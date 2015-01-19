@@ -1,0 +1,36 @@
+{
+  "name": "cherry",
+  "version": "0.0.1",
+  "description": "Distributed WPA/WPA2 cracker",
+  "keywords": [
+    "WPA",
+    "WPA2",
+    "crack",
+    "distributed"
+  ],
+  "homepage": "https://github.com/axilirator/cherry",
+  "bugs": {
+    "url": "https://github.com/axilirator/cherry/issues",
+    "email": "axilirator@gmail.com"
+  },
+  "license": "GPL-2.0",
+  "dependencies": {
+    "crypto": "0.0.3",
+    "exec-sync": "^0.1.6",
+    "fs": "0.0.2",
+    "net": "^1.0.2",
+    "sync": "^0.2.3"
+  },
+  "devDependencies": {
+    "grunt": "^0.4.5",
+    "grunt-contrib-jshint": "~0.10.0",
+    "grunt-contrib-nodeunit": "~0.4.1",
+    "grunt-contrib-uglify": "~0.5.0"
+  },
+  "main": "main.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/axilirator/cherry.git"
+  },
+  "author": "axilirator"
+}

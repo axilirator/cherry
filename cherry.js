@@ -53,14 +53,14 @@ cli
 			'short_name'  : 's',
 			'full_name'   : 'secret',
 			'access_name' : 'master_secret',
-			'description' : 'passphrase for authentification'
+			'description' : 'passphrase for authentication'
 		})
 		.action(function( argv ){
 			var master_class = require( './include/master.js' );
 			var master       = new master_class( argv );
 
-			master.check_cfg();
-			master.start_server();
+			master.check_cfg()
+				&& master.start_server();
 		})
 	.command( 'connect', 'connect this node to the cluster as worker-node' )
 		.option({
@@ -79,7 +79,7 @@ cli
 			'short_name'  : 's',
 			'full_name'   : 'master-secret',
 			'access_name' : 'master_secret',
-			'description' : 'passphrase for authentification'
+			'description' : 'passphrase for authentication'
 		})
 		.option({
 			'short_name'  : 't',
@@ -96,9 +96,9 @@ cli
 			var worker_class = require( './include/worker.js' );
 			var worker       = new worker_class( argv );
 
-			worker.check_cfg();
-			worker.find_tool();
-			worker.connect();
+			worker.check_cfg()
+				&& worker.find_tool()
+					&& worker.connect();
 		})
 	.command( 'help',    'show this help' )
 	// Запуск программы //

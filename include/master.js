@@ -137,112 +137,115 @@ main.prototype.check_cfg = function() {
 
 		return false;
 	}
-}
+};
 
-
-main.prototype.start_server = function() {
-	var cluster = this;
-	var server  = net.createServer(function( socket ) {
-		// Обработка ограничения максимального количества узлов //
-		if ( cluster.master_max_clients > 0 ) {
-			if ( cluster.workers_count === cluster.config.master_max_clients ) {
-				// Подключено максимальное количество узлов //
-				fn.printf( 'warn', 'New connection rejected: max worker-nodes count' );
-
-				socket.writeJSON({
-					'header' : 'connect',
-					'status' : 'rejected',
-					'reason' : 'max-nodes-count'
-				});
-
-				socket.destroy();
-				return;
-			}
-		}
-
-		// Обработка ограничения на динамическое подключение узла //
-		if ( cluster.status === 'processing' && !cluster.config.sync_dynamic ) {
-			fn.printf( 'warn', 'New connection rejected: dynamic synchronization is disabled' );
+/**
+ * Обработчик подключений новых узлов.
+ */
+main.prototype.accept_connection = function( socket ) {
+	// Обработка ограничения максимального количества узлов //
+	if ( cluster.master_max_clients > 0 ) {
+		if ( cluster.workers_count === cluster.config.master_max_clients ) {
+			// Подключено максимальное количество узлов //
+			fn.printf( 'warn', 'New connection rejected: max worker-nodes count' );
 
 			socket.writeJSON({
 				'header' : 'connect',
 				'status' : 'rejected',
-				'reason' : 'dsync-disabled'
+				'reason' : 'max-nodes-count'
 			});
 
 			socket.destroy();
 			return;
 		}
+	}
 
-		fn.printf( 'log', "Processing new connection from %s", socket.remoteAddress );
+	// Обработка ограничения на динамическое подключение узла //
+	if ( cluster.status === 'processing' && !cluster.config.sync_dynamic ) {
+		fn.printf( 'warn', 'New connection rejected: dynamic synchronization is disabled' );
 
-		var worker = {
-			'ip'     	: socket.remoteAddress,
-			'salt'      : fn.random( 1000000000 ),
-			'socket' 	: socket,
-			'connected' : false,
-			'sync'      : true,
-			'speed'  	: 0,
-			'uid'     	: null
-		};
-
-		// Отправка сообщения об успешном соединении //
-		socket.writeJSON({ 
+		socket.writeJSON({
 			'header' : 'connect',
-			'status' : 'connected',
-			'secure' : cluster.config.master_secret ? true : false,
-			'salt'   : worker.salt
+			'status' : 'rejected',
+			'reason' : 'dsync-disabled'
 		});
 
-		// Обработчик поступающих сообщений //
-		socket.on( 'data', function( data ){
-			var response = data.toString().trim();
-			var header   = null;
+		socket.destroy();
+		return;
+	}
 
-			// Данные, которые не удалось распарсить, не обрабатываются //
-			try {
-				response = JSON.parse( response );
-				header   = response.header;
-			} catch ( e ) {
-				fn.printf( 'debug', 'Can not parse request from %s', socket.remoteAddress );
+	fn.printf( 'log', "Processing new connection from %s", socket.remoteAddress );
 
-				socket.writeJSON({
-					'header' : 'error',
-					'error'  : 'parsing_error'
-				});
-			}
+	var worker = {
+		'ip'     	: socket.remoteAddress,
+		'salt'      : fn.random( 1000000000 ),
+		'socket' 	: socket,
+		'connected' : false,
+		'sync'      : true,
+		'speed'  	: 0,
+		'uid'     	: null
+	};
 
-			// Вызвать обработчик соответствующей команды //
-			if ( header in protocol ) {
-				protocol[ header ]( worker, response, cluster, socket );
-			}
-		});
-
-		// Обработчик отключения  //
-		socket.on( 'close', function(){
-			// Если worker уже зарегистрирован //
-			if ( worker[ 'uid' ] !== null ) {
-				var uid = worker[ 'uid' ];
-				var len = cluster.workers_count;
-
-				for ( var i = 0; i < len; i++ ) {
-					if ( cluster.workers[ i ].uid === uid ) {
-						cluster.workers.splice( i, 1 );
-						break;
-					}
-				}
-
-				cluster.workers_count--;
-				cluster.total_speed -= worker.speed;
-			}
-
-			fn.printf( 'log', 'Client %s disconnected', worker.ip );
-
-			// Освобождение памяти //
-			worker = null;
-		});
+	// Отправка сообщения об успешном соединении //
+	socket.writeJSON({ 
+		'header' : 'connect',
+		'status' : 'connected',
+		'secure' : cluster.config.master_secret ? true : false,
+		'salt'   : worker.salt
 	});
 
+	// Обработчик поступающих сообщений //
+	socket.on( 'data', function( data ){
+		var response = data.toString().trim();
+		var header   = null;
+
+		// Данные, которые не удалось распарсить, не обрабатываются //
+		try {
+			response = JSON.parse( response );
+			header   = response.header;
+		} catch ( e ) {
+			fn.printf( 'debug', 'Can not parse request from %s', socket.remoteAddress );
+
+			socket.writeJSON({
+				'header' : 'error',
+				'error'  : 'parsing_error'
+			});
+		}
+
+		// Вызвать обработчик соответствующей команды //
+		if ( header in protocol ) {
+			protocol[ header ]( worker, response, cluster, socket );
+		}
+	});
+
+	// Обработчик отключения  //
+	socket.on( 'close', function(){
+		// Если worker уже зарегистрирован //
+		if ( worker[ 'uid' ] !== null ) {
+			var uid = worker[ 'uid' ];
+			var len = cluster.workers_count;
+
+			for ( var i = 0; i < len; i++ ) {
+				if ( cluster.workers[ i ].uid === uid ) {
+					cluster.workers.splice( i, 1 );
+					break;
+				}
+			}
+
+			cluster.workers_count--;
+			cluster.total_speed -= worker.speed;
+		}
+
+		fn.printf( 'log', 'Client %s disconnected', worker.ip );
+
+		// Освобождение памяти //
+		worker = null;
+	});
+};
+
+main.prototype.start_server = function() {
+	var cluster     = this;
+	var server      = net.createServer( this.accept_connection );
 	var master_port = cluster.config.master_port;
 	
 	server.once( 'error', function( err ) {

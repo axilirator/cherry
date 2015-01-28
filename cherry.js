@@ -20,7 +20,9 @@
 	along with cherry. If not, see <http://www.gnu.org/licenses/>.
 */
 
-var cli = require( 'cayman' );
+var cli = require( '../cayman/cayman.js' );
+
+console.log( process );
 
 cli
 	.meta( 'name',      'cherry' )
@@ -101,5 +103,8 @@ cli
 					&& worker.connect();
 		})
 	.command( 'help',    'show this help' )
+		.action(function(){
+			this.help();
+		})
 	// Запуск программы //
 	.parse( process.argv );

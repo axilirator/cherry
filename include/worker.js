@@ -46,7 +46,7 @@ function worker( argv ) {
 	this.connected		= false;	// Статус подключения
 
 	// Конфигурация узла //
-	this.config			= fn.init_cfg( fs, argv, './worker.conf' );
+	this.config			= fn.init_cfg( fs, argv, 'config/worker.conf' );
 }
 
 /**
@@ -55,11 +55,18 @@ function worker( argv ) {
 worker.prototype.check_cfg = function() {
 	var ip_regexp = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
 
+	// Если возникли ошибки при инициализации //
+	if ( this.config === false ) {
+		return;
+	}
+
+	// Если не определен адрес сервера //
 	if ( this.config.master_ip === undefined ) {
 		fn.printf( 'warn', 'You must specify IP address of master-node\n' );
 		return false;
 	}
 
+	// Если IP имеет некорректный формат //
 	if ( !ip_regexp.test( this.config.master_ip ) ) {
 		fn.printf( 'warn', 'Incorrect master-node\'s IP \'%s\'!\n', this.config.master_ip );
 		return false;

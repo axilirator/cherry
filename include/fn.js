@@ -147,28 +147,27 @@ var fn = {
 	 */
 	'init_cfg': function( fs, argv, path ) {
 		var config = {};
-		path       = path;
 
 		// Чтение базовой конфигурации //
 		if ( this.read_cfg( fs, path + '.defaults', config ) !== true ) {
-			console.error( '  [!] Default configuration corrupted!\n' );
-			process.exit( 1 );
+			this.printf( 'error', 'Default configuration corrupted!' );
+			return false;
 		}
 		
 		// Чтение пользовательской конфигурации //
 		switch ( this.read_cfg( fs, path, config ) ) {
 			case 404:
-				console.warn( '  [-] Configuration file not found, using default settings' );
+				this.printf( 'warn', 'Configuration file not found, using default settings' );
 			break;
 
 			case 500:
-				console.error( '  [!] Configuration file parsing error! Check synatx\n' );
-				process.exit( 1 );
+				this.printf( 'error', 'Configuration file parsing error! Check syntax.' );
+				return false;
 		}
 
 		// Применение параметров командной строки //
 		for ( var i in argv ) {
-			config[ i ] = argv[ i ] || config[ i ];
+			config[ i ] = argv[ i ];
 		}
 
 		return config;
@@ -176,5 +175,5 @@ var fn = {
 };
 
 // Чтение глобальной пользовательской конфигурации //
-fn.read_cfg( fs, 'global.conf', cfg );
+fn.read_cfg( fs, 'config/global.conf', cfg );
 module.exports = fn;

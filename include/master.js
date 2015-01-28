@@ -26,7 +26,7 @@ var protocol = require( './worker_protocol.js' );
 
 // Обработчик сигнала SIGINT //
 process.on('SIGINT', function () {
-	console.log( '\n\n  Got a SIGINT. Disconnecting all nodes...\n' );
+	console.log( '\n  Got a SIGINT. Disconnecting all nodes...\n' );
 	process.exit( 0 );
 });
 
@@ -53,7 +53,7 @@ function main( argv ) {
 	this.total_speed   = 0;			// Суммарная скорость кластера
 
 	// Конфигурация кластера //
-	this.config        = fn.init_cfg( fs, argv, './master.conf' );
+	this.config        = fn.init_cfg( fs, argv, 'config/master.conf' );
 }
 
 /**
@@ -126,6 +126,12 @@ main.prototype.performance = function() {
  */
 main.prototype.check_cfg = function() {
 	var config      = this.config;
+
+	// Если возникли ошибки при инициализации //
+	if ( config === false ) {
+		return;
+	}
+
 	var dictionary  = fs.existsSync( config.dictionary )  && fs.lstatSync( config.dictionary ).isFile();
 	var capturefile = fs.existsSync( config.capturefile ) && fs.lstatSync( config.capturefile ).isFile();
 
@@ -133,7 +139,7 @@ main.prototype.check_cfg = function() {
 		return true;
 	} else {
 		fn.printf( 'error', 'Error opening capturefile and/or dictionary' );
-		fn.printf( 'error', 'Please specify correct capturefile (-r) and dictionary (-d)\n' );
+		fn.printf( 'error', 'Please specify correct capturefile (-r) and dictionary (-d)' );
 
 		return false;
 	}
@@ -143,6 +149,8 @@ main.prototype.check_cfg = function() {
  * Обработчик подключений новых узлов.
  */
 main.prototype.accept_connection = function( socket ) {
+	var cluster = this;
+
 	// Обработка ограничения максимального количества узлов //
 	if ( cluster.master_max_clients > 0 ) {
 		if ( cluster.workers_count === cluster.config.master_max_clients ) {
@@ -237,28 +245,26 @@ main.prototype.accept_connection = function( socket ) {
 		}
 
 		fn.printf( 'log', 'Client %s disconnected', worker.ip );
-
-		// Освобождение памяти //
-		worker = null;
 	});
 };
 
 main.prototype.start_server = function() {
 	var cluster     = this;
-	var server      = net.createServer( this.accept_connection );
+	var handler     = this.accept_connection.bind( cluster );
+	var server      = net.createServer( handler );
 	var master_port = cluster.config.master_port;
 	
 	server.once( 'error', function( err ) {
 		if ( err.code === 'EADDRINUSE' ) {
-			fn.printf( 'error', 'Cannot start server: port %s is busy\n', master_port );
+			fn.printf( 'error', 'Cannot start server: port %s is busy', master_port );
 		} else {
-			fn.printf( 'error', 'Cannot start server: you have no permissions to listen port %s\n', master_port );
+			fn.printf( 'error', 'Cannot start server: you have no permissions to listen port %s', master_port );
 		}
 	}).once( 'listening', function(){
 		fn.printf( 'log', 'Listening on %s port...', master_port );
 
 		// Запуск мониторинга нагрузки //
-		setInterval( cluster.performance.bind( cluster ), 500 );
+		// setInterval( cluster.performance.bind( cluster ), 500 );
 	});
 
 	server.listen( master_port );

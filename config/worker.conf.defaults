@@ -3,10 +3,10 @@
 // To change the configuration use worker.conf
 
 {
-	// IP-адрес целевого сервера
+	// IP-адрес сервера
 	"master_ip"     : false,
 	
-	// Порт целевого сервера.
+	// Порт сервера.
 	"master_port"   : 19935,
 
 	// Пароль для подключения к кластеру.

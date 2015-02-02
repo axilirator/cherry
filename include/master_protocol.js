@@ -54,7 +54,7 @@ module.exports = {
 				var join_request = { 'header' : 'join' };
 
 				if ( params.secure ) {
-					fn.printf( 'log', 'Master-node requires secure authentification' );
+					fn.printf( 'log', 'Master-node requires secure authentication' );
 
 					if ( self.config.master_secret !== false ) {
 						// Если пароль задан //
@@ -64,7 +64,7 @@ module.exports = {
 
 						join_request.secret = md5sum.digest( 'hex' );
 					} else {
-						fn.printf( 'error', 'You must specify master_secret for authentification!\n' );
+						fn.printf( 'error', 'You must specify master_secret for authentication!\n' );
 						connection.end();
 					}
 				}

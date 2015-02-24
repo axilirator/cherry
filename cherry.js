@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env io
 
 /*
 	Copyright (C) 2014-2015 WMN aka Yanitskiy Vadim
@@ -22,11 +22,9 @@
 
 var cli = require( '../cayman/cayman.js' );
 
-console.log( process );
-
 cli
 	.meta( 'name',      'cherry' )
-	.meta( 'version',   '0.0.1-beta' )
+	.meta( 'version',   '0.0.1-alpha' )
 	.meta( 'copyright', '(C) 2014-2015 WMN aka Yanitskiy Vadim' )
 	.meta( 'url',       'https://github.com/axilirator/cherry' )
 	.meta( 'license',   'This code is distributed under the GNU General Public License v3.0' )
@@ -98,9 +96,15 @@ cli
 			var worker_class = require( './include/worker.js' );
 			var worker       = new worker_class( argv );
 
-			worker.check_cfg()
-				&& worker.find_tool()
-					&& worker.connect();
+			worker.check_cfg().then(
+				function() {
+					worker.find_tool().then(
+						function() {
+							worker.connect();
+						}
+					);
+				}
+			);
 		})
 	.command( 'help',    'show this help' )
 		.action(function(){

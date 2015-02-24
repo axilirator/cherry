@@ -21,9 +21,9 @@
 var crypto = require( 'crypto' );
 var fn     = require( './fn.js' );
 
-// Обработчики команд, поступающих от master-node //
+// Обработчики команд, поступающих от сервера //
 module.exports = {
-	'connect': function( self, params, connection ) {
+	'connect' : function( self, params, connection ) {
 		switch ( params.status ) {
 			// Подключение не удалось //
 			case 'rejected':
@@ -40,19 +40,24 @@ module.exports = {
 					case 'dsync-disabled':
 						msg += ' Dynamic joining disabled on this master-node';
 					break;
-
-					case 'bad-secret':
-						msg += ' Incorrect master secret';
-					break;
 				}
 
-				fn.printf( 'warn', msg + '\n' );
+				fn.printf( 'warn', msg );
 			break;
 			
 			// Подключение прошло успешно //
 			case 'connected':
+				// Если асинхронные узлы запрещены //
+				if ( !params.async_allowed && self.config.worker_async ) {
+					fn.printf( 'warn', 'Async-nodes is not allowed' );
+					connection.end();
+					return;
+				}
+
+				// Подготовка запроса //
 				var join_request = { 'header' : 'join' };
 
+				// Если сервер требует предоставить пароль //
 				if ( params.secure ) {
 					fn.printf( 'log', 'Master-node requires secure authentication' );
 
@@ -64,31 +69,48 @@ module.exports = {
 
 						join_request.secret = md5sum.digest( 'hex' );
 					} else {
-						fn.printf( 'error', 'You must specify master_secret for authentication!\n' );
+						fn.printf( 'error', 'You must specify master_secret for authentication!' );
 						connection.end();
+						return;
 					}
 				}
 
 				// Запуск теста производительности //
 				fn.printf( 'log', 'Running benchmark...' );
-				join_request[ 'speed' ] = self.cracking_tool.benchmark();
+				join_request[ 'speed' ] = self.tool.benchmark();
 				join_request[ 'async' ] = self.config.worker_async;
 
 				connection.writeJSON( join_request );
 			break;
-
-			// Узел зарегистрирован в кластере //
-			case 'joined':
-				fn.printf( 'log', 'Successfully joined the cluster' );
-			break;
 		}
 	},
 
-	'message': function( self, params ) {
+	'join' : function( self, params ) {
+		if ( params.status === 'joined' ) {
+			// Узел зарегистрирован в кластере //
+			fn.printf( 'log', 'Successfully joined the cluster' );
+		} else {
+			var msg = 'Cannot join the cluster:';
+
+			switch ( params.reason ) {
+				case 'bad-secret':
+					msg += ' incorrect password';
+				break;
+
+				case 'async-disallowed':
+					msg += ' async-nodes is not allowed';
+				break;
+			}
+
+			fn.printf( 'warn', msg );
+		}
+	},
+
+	'message' : function( self, params ) {
 		fn.printf( params.type, params.body );
 	},
 
-	'kill': function( self ) {
+	'kill' : function( self ) {
 		
 	}
 };

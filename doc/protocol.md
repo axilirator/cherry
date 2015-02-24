@@ -276,3 +276,10 @@
 		</td>
 	</tr>
 </table>
+
+
+
+MAKE GITHUB WIKI!
+DESCRIBE DRIVERS DEFINITION SYNATX.
+ТЕРМИНЫ.
+ХЭШ СЛОВАРЯ crc32

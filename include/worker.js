@@ -39,69 +39,89 @@ net.Socket.prototype.writeJSON = function() {
 	}
 };
 
-function worker( argv ) {
-	this.master_ip		= null;		// IP-адрес master-node
-	this.cracking_tools = null;		// Ссылка на родительский объект инструментов
-	this.cracking_tool  = null;		// Ссылка на интерфейс используемого инструмента
-	this.connected		= false;	// Статус подключения
+function main( argv ) {
+	this.master_ip      = null;  // IP-адрес master-node
+	this.cracking_tools = null;  // Ссылка на родительский объект инструментов
+	this.cracking_tool  = null;  // Ссылка на интерфейс используемого инструмента
+	this.connected      = false; // Статус подключения
 
 	// Конфигурация узла //
-	this.config			= fn.init_cfg( fs, argv, 'config/worker.conf' );
+	this.config = fn.init_cfg( fs, argv, 'config/worker.conf' );
 }
 
 /**
  * Проверяет правильность конфигурации.
  */
-worker.prototype.check_cfg = function() {
-	var ip_regexp = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+main.prototype.check_cfg = function() {
+	var worker = this;
 
-	// Если возникли ошибки при инициализации //
-	if ( this.config === false ) {
-		return;
-	}
+	return new Promise(
+		function( resolve, reject ) {
+			var ip_regexp = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
 
-	// Если не определен адрес сервера //
-	if ( this.config.master_ip === undefined ) {
-		fn.printf( 'warn', 'You must specify IP address of master-node\n' );
-		return false;
-	}
+			fn.printf( 'log', 'Checking configuration...' );
 
-	// Если IP имеет некорректный формат //
-	if ( !ip_regexp.test( this.config.master_ip ) ) {
-		fn.printf( 'warn', 'Incorrect master-node\'s IP \'%s\'!\n', this.config.master_ip );
-		return false;
-	}
+			// Если возникли ошибки при инициализации //
+			if ( worker.config === false ) {
+				reject();
+			}
 
-	return true;
+			// Если не определен адрес сервера //
+			if ( worker.config.master_ip === undefined ) {
+				fn.printf( 'warn', 'You must specify IP address of master-node' );
+				reject();
+			}
+
+			// Если IP имеет некорректный формат //
+			if ( !ip_regexp.test( worker.config.master_ip ) ) {
+				fn.printf( 'warn', "Incorrect master-node's IP '%s'!", worker.config.master_ip );
+				reject();
+			}
+
+			// Все ok! //
+			resolve();
+		}
+	);
 };
 
 /**
  * Выполняет поиск и выбор инструмента для атаки.
  */
-worker.prototype.find_tool = function() {
-	fn.printf( 'log', 'Searching for cracking tools...' );
+main.prototype.find_tool = function() {
+	var worker = this;
 
-	var cracking_tools = require( './tools.js' );
-	var cracking_tool  = cracking_tools.find_tool( this.config.tool );
+	return new Promise(
+		function( resolve, reject ) {
+			var drivers = require( './drivers.js' );
+			fn.printf( 'log', 'Searching for cracking tools...' );
 
-	if ( cracking_tool ) {
-		// Инструмент найден //
-		fn.printf( 'log', 'Using %s as cracking tool', cracking_tool.name );
+			// Запуск поиска инструмента перебора паролей //
+			drivers.search().then(
+				function( tool ) {
+					// Инструмент найден //
+					fn.printf( 'log', 'Using %s as cracking tool', tool.name );
 
-		this.cracking_tools = cracking_tools;
-		this.cracking_tool  = cracking_tool;
+					// Создаем ссылки в объекте кластера //
+					worker.drivers = drivers;
+					worker.tool    = tool;
 
-		return true;
-	} else {
-		fn.printf( 'error', 'Cannot find cracking tool!\n' );
-		return false;
-	}
+					resolve();
+				},
+
+				function( error ) {
+					// Скорее всего, ничего не нашлось... //
+					fn.printf( 'error', 'Cannot find cracking tool!' );
+					reject();
+				}
+			);
+		}
+	);
 };
 
 /**
  * Подключает узел к серверу
  */
-worker.prototype.connect = function() {
+main.prototype.connect = function() {
 	fn.printf( 'log', 'Connecting to %s...', this.config.master_ip );
 
 	var worker      = this;
@@ -109,11 +129,11 @@ worker.prototype.connect = function() {
 	var master_port = this.config.master_port;
 
 	var connection = net.connect( { 'host': master_ip, 'port': master_port }, function(){
-		fn.printf( 'log', 'Sucessefully connected to %s, now joining...', master_ip );
+		fn.printf( 'log', 'Successfully connected to %s, now joining...', master_ip );
 	});
 
 	connection.on( 'error', function(){
-		fn.printf( 'error', 'Cannot connect to %s:%s\n', master_ip, master_port );
+		fn.printf( 'error', 'Cannot connect to %s:%s', master_ip, master_port );
 	});
 
 	// Обработчик поступающих от master-node данных //
@@ -136,8 +156,8 @@ worker.prototype.connect = function() {
 
 	// Обработчик разрыва соединения //
 	connection.on( 'end', function(){
-		fn.printf( 'warn', 'Disconnected from master-node\n' );
+		fn.printf( 'warn', 'Disconnected from master-node' );
 	});
 };
 
-module.exports = worker;
+module.exports = main;

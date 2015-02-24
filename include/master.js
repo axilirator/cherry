@@ -125,7 +125,7 @@ main.prototype.performance = function() {
  * Проверяет правильность конфигурации.
  */
 main.prototype.check_cfg = function() {
-	var config      = this.config;
+	var config = this.config;
 
 	// Если возникли ошибки при инициализации //
 	if ( config === false ) {
@@ -184,22 +184,24 @@ main.prototype.accept_connection = function( socket ) {
 
 	fn.printf( 'log', "Processing new connection from %s", socket.remoteAddress );
 
+	// Подготовка регистрационных данных узла //
 	var worker = {
-		'ip'     	: socket.remoteAddress,
-		'salt'      : fn.random( 1000000000 ),
-		'socket' 	: socket,
-		'connected' : false,
-		'sync'      : true,
-		'speed'  	: 0,
-		'uid'     	: null
+		'ip'     : socket.remoteAddress,
+		'salt'   : fn.random( 1000000000 ),
+		'socket' : socket,
+		'joined' : false,
+		'sync'   : true,
+		'speed'  : 0,
+		'uid'    : null
 	};
 
 	// Отправка сообщения об успешном соединении //
 	socket.writeJSON({ 
-		'header' : 'connect',
-		'status' : 'connected',
-		'secure' : cluster.config.master_secret ? true : false,
-		'salt'   : worker.salt
+		'header'        : 'connect',
+		'status'        : 'connected',
+		'async_allowed' : cluster.config.master_async_allowed,
+		'secure'        : cluster.config.master_secret ? true : false,
+		'salt'          : worker.salt
 	});
 
 	// Обработчик поступающих сообщений //
@@ -213,11 +215,6 @@ main.prototype.accept_connection = function( socket ) {
 			header   = response.header;
 		} catch ( e ) {
 			fn.printf( 'debug', 'Can not parse request from %s', socket.remoteAddress );
-
-			socket.writeJSON({
-				'header' : 'error',
-				'error'  : 'parsing_error'
-			});
 		}
 
 		// Вызвать обработчик соответствующей команды //
@@ -264,7 +261,7 @@ main.prototype.start_server = function() {
 		fn.printf( 'log', 'Listening on %s port...', master_port );
 
 		// Запуск мониторинга нагрузки //
-		// setInterval( cluster.performance.bind( cluster ), 500 );
+		setInterval( cluster.performance.bind( cluster ), 500 );
 	});
 
 	server.listen( master_port );

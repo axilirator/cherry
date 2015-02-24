@@ -21,12 +21,26 @@
 var crypto = require( 'crypto' );
 var fn     = require( './fn.js' );
 
-// Обработчики команд, поступающих от worker-node //
+// Обработчики команд, поступающих от узлов //
 module.exports = {
-	// Обработчик регистрации worker-node в кластере //
+	// Обработчик регистрации узла в кластере //
 	'join': function( node, params, cluster ) {
 		// Если узел еще не подключен //
 		if ( !node[ 'connected' ] ) {
+			// Если запрещено подключение асинхронных узлов //
+			if ( !cluster.config.master_async_allowed && params.async ) {
+				fn.printf( 'log', 'New connection rejected: async-nodes is not allowed' );
+
+				node.socket.writeJSON({
+					'header' : 'join',
+					'status' : 'rejected',
+					'reason' : 'async-disallowed'
+				});
+
+				node.socket.destroy();
+				return;
+			}
+
 			// Если необходима аутентификация //
 			if ( cluster.config.master_secret ) {
 				var md5sum = crypto.createHash( 'md5' );
@@ -35,14 +49,14 @@ module.exports = {
 
 				// Если пароль не верный, отклонить запрос //
 				if ( md5sum.digest( 'hex' ) !== params.secret ) {
-					fn.printf( 'warn', 'New connection rejected: bad secert' );
+					fn.printf( 'warn', 'New connection rejected: bad secret' );
 
 					// Соединение разрывается через 5 секунд для защиты от перебора //
 					setTimeout(function(){
 						// Если узел еще не отключился //
 						if ( !node.socket.destroyed ) {
 							node.socket.writeJSON({
-								'header' : 'connect',
+								'header' : 'join',
 								'status' : 'rejected',
 								'reason' : 'bad-secret'
 							});
@@ -56,11 +70,10 @@ module.exports = {
 			}
 
 			// Инициализация параметров узла //
-			node[ 'uid' ]       = cluster.workers_count;
+			node[ 'uid' ]       = cluster.workers_count++;
 			node[ 'sync' ]      = !params.async;
 			node[ 'speed' ]     = params.speed || 0;
 			node[ 'connected' ] = true;
-			cluster.workers_count++;
 
 			// Регистрация узла //
 			cluster.workers.push( node );
@@ -70,7 +83,7 @@ module.exports = {
 
 			node.socket.writeJSON(
 				{
-					'header' : 'connect',
+					'header' : 'join',
 					'status' : 'joined' 
 				},
 

@@ -19,31 +19,69 @@
 */
 
 var child_process = require( 'child_process' );
+var fn            = require( './fn.js' );
 
 module.exports = {
-	'all': [
+	'drivers': [
 		{
 			'name' : 'pyrit',
 			
-			'search' : function( i, done ) {				
-				var pyrit = child_process.exec( 'pyrit', [ 'help' ] );
+			'search' : function() {
 				var self  = this;
 
-				pyrit.stdout.on( 'data', function( stdout ){
-					// Проверяем пришедшие данные на наличие строки Pyrit //
-					// Регулярным выражением получаем версию //
-					// Если все ок, запускаем success()
-					
-					done( i, self );
-				});
-
-				pyrit.on( 'error', function(){
-					done( i, false );
-				});
+				return new Promise(		
+					function( resolve, reject ) {		
+						var pyrit = child_process.exec( 'pyrit help',
+							function( error, stdout, stderr ) {
+								if ( error === null ) {
+									if ( stdout.indexOf( 'Pyrit' ) === 0 && stdout.indexOf( 'attack_passthrough' ) > 0 ) {
+										fn.printf( 'debug', '(pyrit): Tool found' );
+										resolve( true );
+									} else {
+										fn.printf( 'debug', '(pyrit): Tool found, but the driver can not manage it' );
+										resolve( false );
+									}
+								} else {
+									fn.printf( 'debug', '(pyrit): Tool was not found' );
+									resolve( false );
+								}
+							}
+						);
+					}
+				);
 			},
 
 			'benchmark' : function() {
-				return 6666;
+				var self = this;
+
+				return new Promise(
+					function( resolve, reject ) {
+						var pyrit = child_process.spawn( 'pyrit', [ 'benchmark' ] );
+
+						var speed_regexp  = /([0-9]+)/;
+						var result_regexp = /Computed ([0-9]+)/;
+						var speed;
+						
+						pyrit.stdout.on( 'data',
+							function( data ) {
+								var stdout = data.toString();
+
+								if ( stdout.indexOf( 'Calibrating' ) >= 0 ) {
+									fn.printf( 'debug', '(pyrit) Calibrating...' );
+								} else if ( stdout.indexOf( 'Running' ) >= 0 ) {
+									// Обновление значения скорости в stdout //
+									speed = speed_regexp.exec( stdout )[ 0 ];
+									fn.printf( 'debug', '(pyrit) Speed is %s PMKs/s', speed );
+								} else if ( stdout.indexOf( 'Computed' ) >= 0 ) {
+									// Тест скорости завершен //
+									speed = result_regexp.exec( stdout )[ 0 ];
+									fn.printf( 'debug', '(pyrit) benchmark has been completed with %s PMKs/s', speed );
+									resolve( parseInt( speed ) );
+								}
+							}
+						);
+					}
+				);
 			}
 		}
 	],
@@ -56,54 +94,31 @@ module.exports = {
 	 * @return {object} Интерфейс найденного инструмента
 	*/
 	'search': function( probe ) {
-		var drivers = this.all;
+		var drivers = this.drivers;
 
 		return new Promise( function( resolve, reject ) {
-			var len    = drivers.length;
-			var status = new Array( len );
-			var j      = 0;
+			var len = drivers.length;
+			var all = [];
 
+			// Запускаем проверку наличия инструментов //
 			for ( var i = 0; i < len; i++ ) {
-				drivers[ i ].search( i, done );
+				fn.printf( 'debug', 'Starting probe for \'%s\' driver...', drivers[ i ].name );
+				all.push( drivers[ i ].search() );
 			}
 
-			/**
-			 * Вызывается каждый раз, когда драйвер завершает проверку.
-			 * @param  {[type]}   i      [description]
-			 * @param  {[type]}   result [description]
-			 * @return {Function}        [description]
-			 */
-			function done( i, result ) {
-				status[ i ] = result;
-
-				// Если все драйверы выполнили проверку //
-				if ( ++j === len ) {
-					finish();
-				}
-			}
-
-			/**
-			 * Вызывается, когда все драйверы завершили проверку.
-			 * @return {[type]} [description]
-			 */
-			function finish() {
-				var found = false;
-
-				// Перебор результатов проверок //
-				for ( var i = 0; i < len; i++ ) {
-					if ( status[ i ] !== false ) {
-						// Первый найденный инструмент считается приоритетным //
-						found = status[ i ];
-						break;
+			// После выполнения всех проверок //
+			Promise.all( all ).then(
+				function( results ) {
+					for ( var i = 0; i < results.length; i++ ) {
+						if ( results[ i ] ) {
+							resolve( drivers[ i ] );
+							fn.printf( 'log', 'Using %s as cracking tool', drivers[ i ].name );
+						}
 					}
-				}
 
-				if ( found ) {
-					resolve( found );
-				} else {
 					reject();
 				}
-			}
+			);
 		});
 	}
 };

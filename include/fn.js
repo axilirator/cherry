@@ -20,10 +20,6 @@
 
 // Инициализация глобальных параметров //
 var fs = require( 'fs' );
-var cfg = {
-	'debug'      : false,
-	'enable_log' : false
-};
 
 /**
  * Выполняет замену %s на аргументы args по порядку.
@@ -37,7 +33,7 @@ function prepare( args ) {
 		} else {
 			return args[ counter++ ];
 		}
-	}
+	};
 }
 
 var fn = {
@@ -57,7 +53,7 @@ var fn = {
 				break;
 
 			default:
-				if ( !cfg.debug ) return;
+				if ( !global.DEBUG ) return;
 				message = '[#] ' + message;
 		}
 
@@ -72,14 +68,14 @@ var fn = {
 		}
 
 		// Вызов нативной функции //
-		if ( type === 'debug' && cfg.debug ) {
+		if ( type === 'debug' && global.DEBUG ) {
 			console.info.apply( console, args );
 		} else {
 			console[ type ].apply( console, args );
 		}
 
 		// Логгинг //
-		if ( cfg.enable_log && cfg.log_file ) {
+		/*if ( global.ENABLE_LOG ) {
 			var date = new Date;
 			var now  = '[ ' 
 				+ date.getDate()     + '.'
@@ -98,7 +94,7 @@ var fn = {
 					process.exit( 1 );
 				}
 			});
-		}
+		}*/
 	},
 
 	'random': function( max ) {
@@ -175,5 +171,4 @@ var fn = {
 };
 
 // Чтение глобальной пользовательской конфигурации //
-fn.read_cfg( fs, 'config/global.conf', cfg );
 module.exports = fn;

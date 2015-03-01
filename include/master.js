@@ -126,10 +126,10 @@ main.prototype.performance = function() {
  */
 main.prototype.check_cfg = function() {
 	var config = this.config;
-
+	
 	// Если возникли ошибки при инициализации //
 	if ( config === false ) {
-		return;
+		return false;
 	}
 
 	var dictionary  = fs.existsSync( config.dictionary )  && fs.lstatSync( config.dictionary ).isFile();
@@ -226,8 +226,8 @@ main.prototype.accept_connection = function( socket ) {
 	// Обработчик отключения  //
 	socket.on( 'close', function(){
 		// Если worker уже зарегистрирован //
-		if ( worker[ 'uid' ] !== null ) {
-			var uid = worker[ 'uid' ];
+		if ( worker.uid !== null ) {
+			var uid = worker.uid;
 			var len = cluster.workers_count;
 
 			for ( var i = 0; i < len; i++ ) {
@@ -265,6 +265,6 @@ main.prototype.start_server = function() {
 	});
 
 	server.listen( master_port );
-}
+};
 
 module.exports = main;

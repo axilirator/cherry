@@ -22,17 +22,32 @@
 
 var cli = require( '../cayman/cayman.js' );
 
+global.DEBUG = false;
+
 cli
 	.meta( 'name',      'cherry' )
 	.meta( 'version',   '0.0.1-alpha' )
 	.meta( 'copyright', '(C) 2014-2015 WMN aka Yanitskiy Vadim' )
 	.meta( 'url',       'https://github.com/axilirator/cherry' )
 	.meta( 'license',   'This code is distributed under the GNU General Public License v3.0' )
+
 	.option({
 		'short_name'  : 'd',
 		'full_name'   : 'dictionary',
 		'access_name' : 'dictionary',
 		'description' : 'dictionary for bruteforce'
+	})
+
+	.option({
+		'full_name'   : 'debug',
+		'access_name' : 'debug',
+		'description' : 'enable debug mode',
+		'action'      : function( value ) {
+			if ( value ) {
+				global.DEBUG = true;
+				console.info( '  [#] Debug mode enabled' );
+			}
+		}
 	});
 
 cli	
@@ -96,15 +111,16 @@ cli
 			var worker_class = require( './include/worker.js' );
 			var worker       = new worker_class( argv );
 
-			worker.check_cfg().then(
-				function() {
-					worker.find_tool().then(
-						function() {
-							worker.connect();
-						}
-					);
-				}
-			);
+			worker.check_cfg()
+				.then(
+					function() {
+						return worker.find_tool();
+					}
+				).then(
+					function() {
+						worker.connect();
+					}
+				);
 		})
 	.command( 'help',    'show this help' )
 		.action(function(){

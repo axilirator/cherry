@@ -20,8 +20,9 @@
 	along with cherry. If not, see <http://www.gnu.org/licenses/>.
 */
 
-var cli = require( '../cayman/cayman.js' );
+var cli = require( 'cayman' );
 
+// Глобальные параметры //
 global.DEBUG = false;
 
 cli
@@ -37,7 +38,6 @@ cli
 		'access_name' : 'dictionary',
 		'description' : 'dictionary for bruteforce'
 	})
-
 	.option({
 		'full_name'   : 'debug',
 		'access_name' : 'debug',
@@ -50,8 +50,18 @@ cli
 		}
 	});
 
-cli	
-	.command( 'serve',   'run master-node server on this machine' )
+cli
+	.command( 'config',  'manage configuration' )
+		.action(
+			function( argv ) {
+				var slave_class = require( './include/slave.js' );
+				var slave       = new slave_class( argv );
+
+				slave.find_tool();
+			}
+		)
+
+	.command( 'serve',   'run server on this machine' )
 		.option({
 			'short_name'  : 'r',
 			'full_name'   : 'capturefile',
@@ -61,70 +71,60 @@ cli
 		.option({
 			'short_name'  : 'p',
 			'full_name'   : 'port',
-			'access_name' : 'master_port',
+			'access_name' : 'port',
 			'description' : 'listening port'
 		})
 		.option({
 			'short_name'  : 's',
 			'full_name'   : 'secret',
-			'access_name' : 'master_secret',
+			'access_name' : 'secret',
 			'description' : 'passphrase for authentication'
 		})
-		.action(function( argv ){
-			var master_class = require( './include/master.js' );
-			var master       = new master_class( argv );
+		.action(
+			function( argv ) {
+				var master_class = require( './include/master.js' );
+				var master       = new master_class( argv );
 
-			master.check_cfg()
-				&& master.start_server();
-		})
-	.command( 'connect', 'connect this node to the cluster as worker-node' )
+				master.bootstrap();
+			}
+		)
+	.command( 'slave', 'connect this node to the server' )
 		.option({
 			'short_name'  : 'i',
-			'full_name'   : 'master-ip',
-			'access_name' : 'master_ip',
-			'description' : 'master-node server\'s IP'
+			'full_name'   : 'ip',
+			'access_name' : 'ip',
+			'description' : 'master server\'s IP'
 		})
 		.option({
 			'short_name'  : 'p',
-			'full_name'   : 'master-port',
-			'access_name' : 'master_port',
-			'description' : 'master-node server\'s port'
+			'full_name'   : 'port',
+			'access_name' : 'port',
+			'description' : 'master server\'s port'
 		})
 		.option({
 			'short_name'  : 's',
-			'full_name'   : 'master-secret',
-			'access_name' : 'master_secret',
+			'full_name'   : 'secret',
+			'access_name' : 'secret',
 			'description' : 'passphrase for authentication'
 		})
 		.option({
-			'short_name'  : 't',
-			'full_name'   : 'cracking-tool',
-			'access_name' : 'tool',
-			'description' : 'cracking tool: hashcat, pyrit or aircrack-ng'
-		})
-		.option({
 			'full_name'   : 'async',
-			'access_name' : 'worker_async',
+			'access_name' : 'async',
 			'description' : 'asynchronous mode, requires a individual dictionary'
 		})
-		.action(function( argv ){
-			var worker_class = require( './include/worker.js' );
-			var worker       = new worker_class( argv );
+		.action(
+			function( argv ){
+				var slave_class = require( './include/slave.js' );
+				var slave       = new slave_class( argv );
 
-			worker.check_cfg()
-				.then(
-					function() {
-						return worker.find_tool();
-					}
-				).then(
-					function() {
-						worker.connect();
-					}
-				);
-		})
-	.command( 'help',    'show this help' )
-		.action(function(){
-			this.help();
-		})
+				slave.bootstrap();
+			}
+		)
+	.command( 'help', 'show this help' )
+		.action(
+			function(){
+				this.help();
+			}
+		)
 	// Запуск программы //
 	.parse( process.argv );

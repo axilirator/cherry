@@ -48,7 +48,7 @@ module.exports = {
 			// Подключение прошло успешно //
 			case 'connected':
 				// Если асинхронные узлы запрещены //
-				if ( !params.async_allowed && self.config.worker_async ) {
+				if ( !params.async_allowed && self.config.async ) {
 					fn.printf( 'warn', 'Async-nodes is not allowed' );
 					connection.end();
 					return;
@@ -61,11 +61,11 @@ module.exports = {
 				if ( params.secure ) {
 					fn.printf( 'log', 'Master-node requires secure authentication' );
 
-					if ( self.config.master_secret !== false ) {
+					if ( self.config.secret !== false ) {
 						// Если пароль задан //
 						var md5sum = crypto.createHash( 'md5' );
 						md5sum.update( params.salt.toString() );
-						md5sum.update( self.config.master_secret.toString() );
+						md5sum.update( self.config.secret );
 
 						join_request.secret = md5sum.digest( 'hex' );
 					} else {
@@ -75,10 +75,8 @@ module.exports = {
 					}
 				}
 
-				// Запуск теста производительности //
-				fn.printf( 'log', 'Running benchmark...' );
-				join_request[ 'speed' ] = self.tool.benchmark();
-				join_request[ 'async' ] = self.config.worker_async;
+				join_request[ 'speed' ] = self.speed;
+				join_request[ 'async' ] = self.config.async;
 
 				connection.writeJSON( join_request );
 			break;

@@ -24,25 +24,32 @@ var fn            = require( './fn.js' );
 module.exports = {
 	'drivers': [
 		{
-			'name' : 'pyrit',
+			'name'   : 'pyrit',
+			'path'   : 'pyrit',
 			
 			'search' : function() {
-				var self  = this;
+				var self = this;
 
 				return new Promise(		
-					function( resolve, reject ) {		
-						var pyrit = child_process.exec( 'pyrit help',
+					function( resolve, reject ) {	
+						var version_regexp = /pyrit ([0-9a-z.-]+) /i;
+						var pyrit          = child_process.exec( self.path + ' help',
 							function( error, stdout, stderr ) {
 								if ( error === null ) {
 									if ( stdout.indexOf( 'Pyrit' ) === 0 && stdout.indexOf( 'attack_passthrough' ) > 0 ) {
-										fn.printf( 'debug', '(pyrit): Tool found' );
+										fn.printf( 'debug', '(pyrit) Tool found' );
+
+										// Определение версии //
+										self.version = version_regexp.exec( stdout )[ 1 ];
+										fn.printf( 'debug', '(pyrit) %s version detected', self.version );
+
 										resolve( true );
 									} else {
-										fn.printf( 'debug', '(pyrit): Tool found, but the driver can not manage it' );
+										fn.printf( 'debug', '(pyrit) Tool found, but the driver can not manage it' );
 										resolve( false );
 									}
 								} else {
-									fn.printf( 'debug', '(pyrit): Tool was not found' );
+									fn.printf( 'debug', '(pyrit) Tool was not found' );
 									resolve( false );
 								}
 							}
@@ -56,10 +63,9 @@ module.exports = {
 
 				return new Promise(
 					function( resolve, reject ) {
-						var pyrit = child_process.spawn( 'pyrit', [ 'benchmark' ] );
+						var pyrit = child_process.spawn( self.path, [ 'benchmark' ] );
 
 						var speed_regexp  = /([0-9]+)/;
-						var result_regexp = /Computed ([0-9]+)/;
 						var speed;
 						
 						pyrit.stdout.on( 'data',
@@ -74,7 +80,7 @@ module.exports = {
 									fn.printf( 'debug', '(pyrit) Speed is %s PMKs/s', speed );
 								} else if ( stdout.indexOf( 'Computed' ) >= 0 ) {
 									// Тест скорости завершен //
-									speed = result_regexp.exec( stdout )[ 0 ];
+									speed = speed_regexp.exec( stdout )[ 0 ];
 									fn.printf( 'debug', '(pyrit) benchmark has been completed with %s PMKs/s', speed );
 									resolve( parseInt( speed ) );
 								}
@@ -82,43 +88,44 @@ module.exports = {
 						);
 					}
 				);
+			},
+
+			'speed' : function() {
+				var self = this;
+
+				return new Promise(
+					function( resolve, reject ) {
+
+					}
+				);
+			}
+		},
+
+		{
+			'name'   : 'hashcat',
+
+			'search' : function() {
+				  
 			}
 		}
 	],
 
 	/**
-	 * Проверяет возможность запуска указанной программы.
-	 * Используется для поиска инструментов подбора пароля.
+	 * Выполняет проверку наличия драйвера указанного инструмента.
 	 *
-	 * @param  {string} Название проверяемой программы
-	 * @return {object} Интерфейс найденного инструмента
+	 * @param  {string}         Название проверяемой программы
+	 * @return {boolean|object} Результат проверки
 	*/
 	'search': function( probe ) {
 		var drivers = this.drivers;
-
-		return new Promise( function( resolve, reject ) {
-			var len = drivers.length;
-			var all = [];
-
-			// Запускаем проверку наличия инструментов //
-			for ( var i = 0; i < len; i++ ) {
-				fn.printf( 'debug', 'Starting probe for \'%s\' driver...', drivers[ i ].name );
-				all.push( drivers[ i ].search() );
+		var count   = drivers.length;
+		
+		for ( var i = 0; i < count; i++ ) {
+			if ( drivers[ i ].name === probe ) {
+				return drivers[ i ];
 			}
+		}
 
-			// После выполнения всех проверок //
-			Promise.all( all ).then(
-				function( results ) {
-					for ( var i = 0; i < results.length; i++ ) {
-						if ( results[ i ] ) {
-							resolve( drivers[ i ] );
-							fn.printf( 'log', 'Using %s as cracking tool', drivers[ i ].name );
-						}
-					}
-
-					reject();
-				}
-			);
-		});
+		return false;
 	}
 };

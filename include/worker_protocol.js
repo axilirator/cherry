@@ -28,7 +28,7 @@ module.exports = {
 		// Если узел еще не подключен //
 		if ( !node[ 'connected' ] ) {
 			// Если запрещено подключение асинхронных узлов //
-			if ( !cluster.config.master_async_allowed && params.async ) {
+			if ( !cluster.config.async_allowed && params.async ) {
 				fn.printf( 'log', 'New connection rejected: async-nodes is not allowed' );
 
 				node.socket.writeJSON({
@@ -42,10 +42,10 @@ module.exports = {
 			}
 
 			// Если необходима аутентификация //
-			if ( cluster.config.master_secret ) {
+			if ( cluster.config.secret ) {
 				var md5sum = crypto.createHash( 'md5' );
 				md5sum.update( node.salt.toString() );
-				md5sum.update( cluster.config.master_secret.toString() );
+				md5sum.update( cluster.config.secret );
 
 				// Если пароль не верный, отклонить запрос //
 				if ( md5sum.digest( 'hex' ) !== params.secret ) {
@@ -70,13 +70,13 @@ module.exports = {
 			}
 
 			// Инициализация параметров узла //
-			node[ 'uid' ]       = cluster.workers_count++;
-			node[ 'sync' ]      = !params.async;
+			node[ 'uid' ]       = cluster.nodes_count++;
+			node[ 'async' ]     = params.async;
 			node[ 'speed' ]     = params.speed || 0;
 			node[ 'connected' ] = true;
 
 			// Регистрация узла //
-			cluster.workers.push( node );
+			cluster.nodes.push( node );
 
 			// Обновление данных о скорости //
 			cluster.total_speed += node[ 'speed' ];
@@ -94,7 +94,7 @@ module.exports = {
 				}
 			);
 
-			fn.printf( 'log', 'Worker-node %s has joined the cluster', node.ip );
+			fn.printf( 'log', 'Node %s has joined the cluster', node.ip );
 		}
 	},
 

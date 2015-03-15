@@ -21,21 +21,6 @@
 // Инициализация глобальных параметров //
 var fs = require( 'fs' );
 
-/**
- * Выполняет замену %s на аргументы args по порядку.
-*/
-function prepare( args ) {
-	var counter = 1;
-
-	return function( found ) {
-		if ( found === '\n' ) {
-			return '';
-		} else {
-			return args[ counter++ ];
-		}
-	};
-}
-
 var fn = {
 	'printf': function( type, message ) {
 		// Добавление индикатора сообщения: [+], [-], [#], [!] //
@@ -73,28 +58,6 @@ var fn = {
 		} else {
 			console[ type ].apply( console, args );
 		}
-
-		// Логгинг //
-		/*if ( global.ENABLE_LOG ) {
-			var date = new Date;
-			var now  = '[ ' 
-				+ date.getDate()     + '.'
-				+ date.getMonth() +1 + '.'
-				+ date.getFullYear() + ' '
-				+ date.getHours()    + ':'
-				+ date.getMinutes()  + ':'
-				+ date.getSeconds()  + ' ] ';
-
-			message = message.replace( /(\n|%s)/g, prepare( args ) );
-
-			// Запись события в файл //
-			fs.appendFile( cfg.log_file, now + message + '\n', function( err ){
-				if ( err ) {
-					console.error( '  [!] Error writing to log file!' );
-					process.exit( 1 );
-				}
-			});
-		}*/
 	},
 
 	'random': function( max ) {
@@ -104,69 +67,59 @@ var fn = {
 	/**
 	 * Читает файл конфигурации в формате JSON в объект target.
 	 *
-	 * @param  {object}  fs     Библиотека взаимодействия с файловой системой
 	 * @param  {string}  path   Путь к файлу конфигурации
 	 * @param  {object}  target Объект, которому присваиваются прочитанные директивы
-	 * @return {number} 		Успешность чтения конфигурации:
-	 *							true - успех, 404 - файл не найден, 500 - ошибка парсинга 
+	 * @return {promise}
 	 */
-	'read_cfg': function( fs, path, target ) {
-		try {
-			var cfg = fs.readFileSync( path, 'utf8' );
+	'read_json' : function( path, target ) {
+		return new Promise(
+			function( resolve, reject ) {
+				var file = new Promise(
+					function( resolve, reject ) {
+						// Читаем файл //
+						fs.readFile( path,
+							{
+								'encoding' : 'utf8',
+								'flag'     : 'r'
+							},
 
-			// Удаляем комментарии //
-			cfg = cfg.replace( /\/\/.*$/gm, '' );
+							function( error, content ) {
+								if ( error ) {
+									reject( error );
+								} else {
+									resolve( content );
+								}
+							}
+						);
+					}
+				);
 
-			try {
-				cfg = JSON.parse( cfg );
+				file.then(
+					function( content ) {
+						// Удаляем комментарии //
+						var pure = content.replace( /\/\/.*$/gm, '' );
 
-				for ( var i in cfg ) {
-					target[ i ] = cfg[ i ];
-				}
+						// Попытка парсинга //
+						try {
+							pure = JSON.parse( pure );
 
-				return true;
-			} catch( e ) {
-				return 500;
+							for ( var i in pure ) {
+								target[ i ] = pure[ i ];
+							}
+
+							resolve( target );
+						} catch ( e ) {
+							// Ошибка парсинга //
+							reject( 'parsing_error' );
+						}
+					},
+
+					function( error ) {
+						reject( 'read_error' );
+					}
+				);
 			}
-		} catch( e ) {
-			return 404;
-		}
-	},
-
-	/**
-	 * Инициализирует базовую конфигурацию и корректирует ее пользовательской.
-	 *
-	 * @param  {object} fs    Библиотека взаимодействия с файловой системой
-	 * @param  {string} path  Путь к файлу конфигурации
-	 * @param  {object} argv  Объект параметров командной строки
-	 * @return {object} 	  Итоговый файл конфигурации
-	 */
-	'init_cfg': function( fs, argv, path ) {
-		var config = {};
-
-		// Чтение базовой конфигурации //
-		if ( this.read_cfg( fs, path + '.defaults', config ) !== true ) {
-			this.printf( 'error', 'Default configuration corrupted!' );
-			return false;
-		}
-		
-		// Чтение пользовательской конфигурации //
-		switch ( this.read_cfg( fs, path, config ) ) {
-			case 404:
-				this.printf( 'warn', 'Configuration file not found, using default settings' );
-			break;
-
-			case 500:
-				this.printf( 'error', 'Configuration file parsing error! Check syntax.' );
-				return false;
-		}
-
-		// Применение параметров командной строки //
-		for ( var i in argv ) {
-			config[ i ] = argv[ i ];
-		}
-
-		return config;
+		);
 	}
 };
 

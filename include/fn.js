@@ -19,7 +19,8 @@
 */
 
 // Инициализация глобальных параметров //
-var fs = require( 'fs' );
+var fs            = require( 'fs' );
+var child_process = require( 'child_process' );
 
 var fn = {
 	'printf': function( type, message ) {
@@ -71,7 +72,7 @@ var fn = {
 	 * @param  {object}  target Объект, которому присваиваются прочитанные директивы
 	 * @return {promise}
 	 */
-	'read_json' : function( path, target ) {
+	'read_json': function( path, target ) {
 		return new Promise(
 			function( resolve, reject ) {
 				var file = new Promise(
@@ -120,6 +121,76 @@ var fn = {
 				);
 			}
 		);
+	},
+
+	'file': function( path ) {
+		this.path     = path;
+		this.size     = null;
+		this.checksum = null;
+
+		// Методы класса //
+		
+		/**
+		 * Читает информацию о файле.
+		 * @return {promise}
+		 */
+		this.info = function() {
+			var self = this;
+
+			return new Promise(
+				function( resolve, reject ) {
+					fs.stat( self.path,
+						function( error, stats ) {
+							if ( error ) {
+								reject({
+									'error' : error,
+									'path'  : path
+								});
+							} else {
+								// Если путь ссылается на существующий файл //
+								if ( stats.isFile() ) {
+									self.size = stats.size;
+									resolve( self );
+								} else {
+									reject({
+										'error' : 'NaF',
+										'path'  : path
+									});
+								}
+							}
+						}
+					);
+				}
+			);
+		};
+
+		/**
+		 * Рассчитывает контрольную сумму CRC32.
+		 * @return {promise}
+		 */
+		this.calculate_checksum = function() {
+			var self = this;
+
+			return new Promise(
+				function( resolve, reject ) {
+					var crc32 = child_process.exec( 'crc32 ' + self.path,
+						function( error, stdout, stderr ) {
+							if ( error === null ) {
+								// Отрезаем символ перевода строки //
+								self.checksum = stdout.substr( 0, stdout.length - 1 );
+								resolve( self.checksum );
+							} else {
+								fn.printf( 'error', "Cannot calculate crc32. Have you a crc32 utility?" );
+								reject({
+									'error' : 'checksum',
+									'path'  : path
+								});
+							}
+						}
+					);
+				}
+			);
+		};
 	}
 };
 

@@ -35,11 +35,6 @@ module.exports = {
 					case 'max-nodes-count':
 						msg += ' Workers count limited';
 					break;
-
-					// Динамическая синхронизация отключена //
-					case 'dsync-disabled':
-						msg += ' Dynamic joining disabled on this master-node';
-					break;
 				}
 
 				fn.printf( 'warn', msg );
@@ -47,19 +42,26 @@ module.exports = {
 			
 			// Подключение прошло успешно //
 			case 'connected':
+				// Вывод информации о сервере //
+				fn.printf( 'log', 'Server version: %s', params.version_txt );
+
 				// Если асинхронные узлы запрещены //
 				if ( !params.async_allowed && self.config.async ) {
-					fn.printf( 'warn', 'Async-nodes is not allowed' );
+					fn.printf( 'warn', 'Asynchronous nodes are not allowed' );
 					connection.end();
 					return;
 				}
 
 				// Подготовка запроса //
-				var join_request = { 'header' : 'join' };
+				var join_request = {
+					'header'      : 'join',
+					'version_num' : global.NUM_VER,
+					'version_txt' : global.TXT_VER
+				};
 
 				// Если сервер требует предоставить пароль //
 				if ( params.secure ) {
-					fn.printf( 'log', 'Master-node requires secure authentication' );
+					fn.printf( 'log', 'Master requires secure authentication' );
 
 					if ( self.config.secret !== false ) {
 						// Если пароль задан //
@@ -69,14 +71,29 @@ module.exports = {
 
 						join_request.secret = md5sum.digest( 'hex' );
 					} else {
-						fn.printf( 'error', 'You must specify master_secret for authentication!' );
+						fn.printf( 'error', 'You must specify secret for authentication!' );
 						connection.end();
 						return;
 					}
 				}
 
-				join_request[ 'speed' ] = self.speed;
-				join_request[ 'async' ] = self.config.async;
+				// Информация о словаре //
+				if ( !self.config.async ) {
+					join_request.async               = false;
+					join_request.dictionary_size     = self.dictionary.size;
+					join_request.dictionary_checksum = self.dictionary.checksum;
+				} else {
+					join_request.async               = true;
+				}
+
+				// Информация о скорости узла //
+				join_request.speed = self.speed;
+
+				// Информация об инструменте //
+				join_request.tool  = {
+					'name'    : self.tool.name,
+					'version' : self.tool.version
+				};
 
 				connection.writeJSON( join_request );
 			break;
@@ -93,11 +110,19 @@ module.exports = {
 			switch ( params.reason ) {
 				case 'bad-secret':
 					msg += ' incorrect password';
-				break;
+					break;
 
 				case 'async-disallowed':
 					msg += ' async-nodes is not allowed';
-				break;
+					break;
+
+				case 'version':
+					msg += ' the server\'s version differ from your';
+					break;
+
+				case 'dictionary-checksum':
+					msg += ' checksums of dictionaries does not match';
+					break;
 			}
 
 			fn.printf( 'warn', msg );
@@ -105,10 +130,6 @@ module.exports = {
 	},
 
 	'message' : function( self, params ) {
-		fn.printf( params.type, params.body );
-	},
-
-	'kill' : function( self ) {
-		
+		fn.printf( params.type, '(master) ' + params.body );
 	}
 };

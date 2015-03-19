@@ -229,6 +229,14 @@
 	</tr>
 
 	<tr>
+		<td>[dictionary]</td>
+		<td>String</td>
+		<td>
+			Контрольная сумма (CRC32) словаря. Передается только в синхронном режиме.
+		</td>
+	</tr>
+
+	<tr>
 		<td>[secret]</td>
 		<td>String</td>
 		<td>

@@ -76,9 +76,9 @@ var inScope = {
 	// Метод перехода к звену, находящемуся через count звеньев //
 	'skip' : function( count ) {
 		// Если целевое звено в пределах достигаемости //
-		if ( this.pointer + count + 1 < this.count ) {
+		if ( this.pointer + ( count || 1 ) + 1 < this.count ) {
 			// Перемещаем указатель на адрес нового узла //
-			this.pointer += count + 1;
+			this.pointer += ( count || 1 ) + 1;
 
 			// Запускаем целевое звено //
 			this.callNode();
@@ -186,8 +186,12 @@ chain.prototype.callNode = function() {
 		this.nodes[ this.pointer ].then(
 			// Успешное выполнение обещания //
 			function( result ) {
-				for ( var i in result ) {
-					chain.storage[ i ] = result[ i ];
+				if ( typeof result === 'object' ) {
+					for ( var i in result ) {
+						chain.storage[ i ] = result[ i ];
+					}
+				} else {
+					chain.storage.result = result;
 				}
 
 				chain.next();

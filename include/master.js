@@ -21,6 +21,7 @@
 var fs       = require( 'fs' );
 var net      = require( 'net' );
 var path     = require( 'path' );
+var crypto   = require( 'crypto' );
 
 var fn       = require( './fn.js' );
 var chain    = require( './chains.js' );
@@ -54,9 +55,11 @@ net.Socket.prototype.writeJSON = function() {
  */
 function master( argv ) {
 	this.nodes       = [];   // Массив подключенных узлов
+	this.config      = {};   // Конфигурация кастера
+	this.dictionary  = null; // Интерфейс словаря
+	this.capturefile = null; // Интерфейс файла handshake
 	this.nodes_count = 0;    // Количество подключенных узлов
 	this.total_speed = 0;    // Суммарная скорость кластера
-	this.config      = {};   // Конфигурация кастера
 	this.argv        = argv; // Параметры командной строки
 }
 
@@ -67,7 +70,7 @@ master.prototype.bootstrap = function() {
 	var self = this;
 	var main = new chain([
 		function( chain ) {
-			fn.printf( 'debug', 'Bootstraping...' );
+			fn.printf( 'log', 'Bootstraping...' );
 			fn.printf( 'debug', 'Reading configuration...' );
 			chain.next();
 		},
@@ -89,34 +92,44 @@ master.prototype.bootstrap = function() {
 		// Проверка конфигурации //
 		function( chain ) {
 			fn.printf( 'debug', 'Checking configuration...' );
-			self.check_config( self.config ) && chain.next();
+			if ( self.check_config( self.config ) ) chain.next();
 		},
 
-		// Загрузка драйвера словаря //
+		// Асинхронная загрузка словаря и файла handshake //
 		function( chain ) {
 			fn.printf( 'debug', 'Loading dictionary driver...' );
-			
-			var driver      = require( './dictionary.js' );
-			self.dictionary = new driver( self.config.dictionary );
+			self.dictionary  = new fn.file( self.config.dictionary );
 
-			// Как только драйвер обработает словарь, идем дальше //
-			self.dictionary.bootstrap().then( chain.next );
+			fn.printf( 'debug', 'Reading capturefile...' );
+			self.capturefile = new fn.file( self.config.capturefile );
+
+			chain.next();
 		},
 
-		// Обработка handshake //
+		// Проверка существования и получение размеров файлов //
 		function( chain ) {
-			fs.stat( self.config.capturefile,
-				function( error, stats ) {
-					if ( error ) {
-						fn.printf( 'error', "Cannot open capturefile '%s'!", self.config.capturefile );
+			Promise.all([
+				self.dictionary.info(),
+				self.capturefile.info()
+			]).then( chain.next ).catch(
+				function( e ) {
+					if ( e.error === 'NaF' ) {
+						fn.printf( 'error', "'%s' is not a file", e.path );
 					} else {
-						// Если путь ссылается на существующий файл //
-						if ( stats.isFile() ) {
-							chain.next();
-						} else {
-							fn.printf( 'error', "'%s' is not a file!", self.config.capturefile );
-						}
+						fn.printf( 'error', "Cannot read file '%s'", e.path );
 					}
+				}
+			);
+		},
+
+		// Рассчет контрольных сумм //
+		function( chain ) {
+			Promise.all([
+				self.dictionary.calculate_checksum(),
+				self.capturefile.calculate_checksum()			
+			]).then( chain.next ).catch(
+				function( e ) {
+					fn.printf( 'error', "Cannot calculate checksum for '%s'! Have you the crc32 utility?" );
 				}
 			);
 		},
@@ -125,8 +138,6 @@ master.prototype.bootstrap = function() {
 		function( chain ) {
 			fn.printf( 'debug', 'Bootstraping finished, starting server...' );
 			self.start_server();
-
-			chain.next();
 		}
 	]);
 
@@ -256,39 +267,134 @@ master.prototype.broadcast = function( header, data, type ) {
  */
 master.prototype.performance = function() {
 	process.stdout.write( "      Total speed: " + this.total_speed + " PMK/s\r" );
-	return;
+};
 
-	/*if ( !nodes_count )
+/**
+ * Метод регистрации узла в кластере.
+ * @param  {object} node   Ссылка на объект узла
+ * @param  {object} params Параметры, переданные узлом
+ */
+master.prototype.join = function( node, params ) {
+	var cluster = this;
+
+	// Проверка версии узла //
+	if ( params.version_num < global.NUM_VER ) {
+		fn.printf( 'log', 'New connection rejected: version conflict' );
+
+		node.socket.writeJSON({
+			'header' : 'join',
+			'status' : 'rejected',
+			'reason' : 'version'
+		});
+
+		node.socket.destroy();
 		return;
-
-	var sync_count  = 0;
-	var async_count = 0;
-
-	console.log( '  [+] Cluster map:' );
-
-	// Отображение синхронизированных узлов //
-	for ( var i = 0; i < nodes_count; i++ ) {
-		if ( nodes[ i ].sync ) {
-			if ( sync_count === 0 ) {
-				console.log( '      Sync nodes:' );
-			}
-
-			console.log( '        #%s %s: %s PMK/s', ++sync_count, nodes[ i ].ip, nodes[ i ].speed );
-		}
-	}
-	
-	// Отображение асинхронных узлов //
-	for ( var i = 0; i < nodes_count; i++ ) {
-		if ( !nodes[ i ].sync ) {
-			if ( async_count === 0 ) {
-				console.log( '      Async nodes:' );
-			}
-
-			console.log( '        #%s %s: %s PMK/s', ++async_count, nodes[ i ].ip, nodes[ i ].speed );
-		}
 	}
 
-	console.log( "\n      Total speed: %s PMK/s", cluster.total_speed );*/
+	// Если запрещено подключение асинхронных узлов //
+	if ( !cluster.config.async_allowed && params.async ) {
+		fn.printf( 'log', 'New connection rejected: asynchronous nodes are not allowed' );
+
+		node.socket.writeJSON({
+			'header' : 'join',
+			'status' : 'rejected',
+			'reason' : 'async-disallowed'
+		});
+
+		node.socket.destroy();
+		return;
+	}
+
+	// Если необходима аутентификация //
+	if ( cluster.config.secret ) {
+		var md5sum = crypto.createHash( 'md5' );
+		md5sum.update( node.salt.toString() );
+		md5sum.update( cluster.config.secret );
+
+		// Если пароль не верный, отклонить запрос //
+		if ( md5sum.digest( 'hex' ) !== params.secret ) {
+			fn.printf( 'warn', 'New connection rejected: bad secret' );
+
+			// Соединение разрывается через 5 секунд для защиты от перебора //
+			setTimeout(function(){
+				// Если узел еще не отключился //
+				if ( !node.socket.destroyed ) {
+					node.socket.writeJSON({
+						'header' : 'join',
+						'status' : 'rejected',
+						'reason' : 'bad-secret'
+					});
+
+					node.socket.destroy();
+				}
+			}, 5000 );
+
+			return;
+		}
+	}
+
+	// Проверка контрольной суммы словаря //
+	if ( !params.async ) {
+		if (
+			params.dictionary_size     !== cluster.dictionary.size ||
+			params.dictionary_checksum !== cluster.dictionary.checksum
+		) {
+			fn.printf( 'log', 'New connection rejected: dictionary checksum error' );
+
+			node.socket.writeJSON({
+				'header' : 'join',
+				'status' : 'rejected',
+				'reason' : 'dictionary-checksum'
+			});
+
+			node.socket.destroy();
+			return;
+		}
+	}
+
+	// Проверка значения скорости //
+	if ( params.speed < 100 || params.speed > 1000000 ) {
+		// Неверное значение скорости //
+		fn.printf( 'log', 'New connection rejected: incorrect speed value' );
+
+		node.socket.writeJSON({
+			'header' : 'join',
+			'status' : 'rejected',
+			'reason' : 'wrong-speed'
+		});
+
+		node.socket.destroy();
+		return;
+	}
+
+	// Все проверки прошли успешно //
+	// Инициализация параметров узла //
+	node.joined = true;
+	node.uid    = cluster.nodes_count++;
+	node.async  = params.async;
+	node.speed  = params.speed;
+
+	// Регистрация узла //
+	cluster.nodes.push( node );
+
+	// Обновление данных о скорости //
+	cluster.total_speed += node.speed;
+
+	// Уведомление узла об успешной регистрации //
+	node.socket.writeJSON(
+		{
+			'header' : 'join',
+			'status' : 'joined' 
+		},
+
+		{
+			'header' : 'message',
+			'type'   : 'log',
+			'body'   : 'Welcome to the cluster!'
+		}
+	);
+
+	fn.printf( 'log', 'Node %s has joined the cluster', node.ip );
 };
 
 /**
@@ -317,28 +423,28 @@ master.prototype.connection_acceptor = function( socket ) {
 	fn.printf( 'log', "Processing new connection from %s", socket.remoteAddress );
 
 	// Подготовка регистрационных данных узла //
-	var worker = {
+	var node = {
 		'ip'     : socket.remoteAddress,
 		'salt'   : fn.random( 1000000000 ),
 		'socket' : socket,
-		'joined' : false,
-		'async'  : false,
-		'speed'  : 0,
-		'uid'    : null
+		'joined' : false
 	};
 
 	// Отправка сообщения об успешном соединении //
 	socket.writeJSON({ 
 		'header'        : 'connect',
 		'status'        : 'connected',
+		'version_txt'   : global.TXT_VER,
+		'version_num'   : global.NUM_VER,
 		'async_allowed' : cluster.config.async_allowed,
 		'secure'        : cluster.config.secret ? true : false,
-		'salt'          : worker.salt
+		'salt'          : node.salt
 	});
 
 	// Обработчик поступающих сообщений //
 	socket.on( 'data', function( data ){
 		var response = data.toString().trim();
+		var source   = node.joined ? protocol.joined : protocol.all;
 		var header   = null;
 
 		// Данные, которые не удалось распарсить, не обрабатываются //
@@ -347,33 +453,31 @@ master.prototype.connection_acceptor = function( socket ) {
 			header   = response.header;
 		} catch ( e ) {
 			fn.printf( 'debug', 'Cannot parse request from %s', socket.remoteAddress );
+			return;
 		}
 
 		// Вызвать обработчик соответствующей команды //
-		if ( header in protocol ) {
-			protocol[ header ]( worker, response, cluster, socket );
+		if ( header in source ) {
+			source[ header ]( node, response, cluster );
 		}
 	});
 
 	// Обработчик отключения  //
 	socket.on( 'close', function(){
-		// Если worker уже зарегистрирован //
-		if ( worker.uid !== null ) {
-			var uid = worker.uid;
-			var len = cluster.nodes_count;
-
-			for ( var i = 0; i < len; i++ ) {
-				if ( cluster.nodes[ i ].uid === uid ) {
+		// Если узел уже зарегистрирован //
+		if ( node.joined ) {
+			for ( var i = 0; i < cluster.nodes_count; i++ ) {
+				if ( cluster.nodes[ i ].uid === node.uid ) {
 					cluster.nodes.splice( i, 1 );
 					break;
 				}
 			}
 
 			cluster.nodes_count--;
-			cluster.total_speed -= worker.speed;
+			cluster.total_speed -= node.speed;
 		}
 
-		fn.printf( 'log', 'Client %s disconnected', worker.ip );
+		fn.printf( 'log', 'Client %s disconnected', node.ip );
 	});
 };
 

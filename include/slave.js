@@ -67,7 +67,7 @@ slave.prototype.bootstrap = function( config ) {
 	var main = new chain([
 		function( chain ) {
 			fn.printf( 'log', 'Bootstraping...' );
-			fn.printf( 'log', 'Reading configuration...' );
+			fn.printf( 'debug', 'Reading configuration...' );
 			chain.next();
 		},
 
@@ -87,32 +87,41 @@ slave.prototype.bootstrap = function( config ) {
 
 		// Проверка конфигурации //
 		function( chain ) {
-			fn.printf( 'log', 'Checking configuration...' );
+			fn.printf( 'debug', 'Checking configuration...' );
 			if ( self.check_config( self.config ) ) {
 				if ( !self.config.async ) {
 					chain.next();
 				} else {
-					chain.skip();
+					self.load_tool_driver().then( chain.skip );
 				}
 			}
 		},
 
-		// Загрузка словаря //
 		function( chain ) {
 			fn.printf( 'log', 'Loading dictionary driver...' );
-			
-			var driver      = require( './dictionary.js' );
-			self.dictionary = new driver( self.config.dictionary );
 
-			// Как только драйвер обработает словарь, идем дальше //
-			self.dictionary.bootstrap().then( chain.next );
+			self.dictionary = new fn.file( self.config.dictionary );
+
+			// Асинхронные действия :) //
+			Promise.all([
+				// Загрузка драйвера инструмента перебора паролей //
+				self.load_tool_driver(),
+
+				// Загрузка словаря //
+				self.dictionary.info(),
+				self.dictionary.calculate_checksum()
+			]).then( chain.next ).catch(
+				function( error ) {
+					if ( e.error === 'NaF' ) {
+						fn.printf( 'error', "'%s' is not a file", e.path );
+					} else {
+						fn.printf( 'error', "Cannot read file '%s'", e.path );
+					}
+				}
+			);
 		},
 
-		// Загрузка драйвера инструмента перебора паролей //
-		function( chain ) {
-			self.load_tool_driver().then( chain.next );
-		},
-
+		// Запуск сервера //
 		function( chain ) {
 			fn.printf( 'log', 'Cracking speed: %s PMKs/s', self.speed );
 			fn.printf( 'debug', 'Starting server...' );
@@ -238,26 +247,70 @@ slave.prototype.load_tool_driver = function() {
 				self.tool   = driver;
 				driver.path = self.config.tool.path;
 
-				fn.printf( 'log', 'Loading cracking tool driver...' );
-				driver.search().then(
-					function( result ) {
+				var main = new chain([
+					// Поиск инструмента в системе //
+					driver.search(),
+
+					// Инструмент найден, получение скорости //
+					function( chain, storage ) {
+						fn.printf( 'log', 'Loading cracking tool driver...' );
+
+						// Если скорость уже задана в конфигурации //
 						if ( self.config.tool.speed ) {
-							return result ? self.config.tool.speed : false;
+							storage.speed = self.config.tool.speed;
+							chain.skip();
 						} else {
-							return result ? driver.benchmark() : false;
+							chain.next();
 						}
-					}
-				).then(
-					function( speed ) {
-						if ( speed !== false ) {
-							self.speed = speed;
+					},
+
+					// Выполнение теста производительности //
+					function( chain, storage ) {
+						fn.printf( 'log', 'Running benchmark...' );
+
+						driver.benchmark().then(
+							function( speed ) {
+								storage.speed = speed;
+								chain.next();
+							}
+						);
+					},
+
+					// Запись результатов //
+					function( chain, storage ) {
+						if ( storage.speed > 0 && storage.speed < 1000000 ) {
+							self.speed = storage.speed;
 							resolve();
 						} else {
-							fn.printf( 'error', 'Tool was not found on this system' );
+							fn.printf( 'error', 'Incorrect speed value! Check your cracking tool' );
 							reject();
 						}
 					}
-				);
+				]);
+
+				main.onError(
+					function( e ) {
+						switch ( e ) {
+							case 'not_found':
+								fn.printf( 'error', 'Tool was not found on this system' );
+								break;
+
+							case 'die':
+								fn.printf( 'error', 'Cracking tool unexpectedly died' );
+								break;
+
+							case 'benchmark':
+								fn.printf( 'error', 'Benchmarking error' );
+								break;
+
+							default:
+								fn.printf( 'error', 'Unhandled error' );
+						}
+
+						fn.printf( 'warn', 'Use --debug mode for details' );
+						reject();
+					}
+				).run();
 			} else {
 				fn.printf( 'error', 'Cannot find a driver' );
 			}

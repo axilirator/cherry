@@ -23,7 +23,9 @@
 var cli = require( 'cayman' );
 
 // Глобальные параметры //
-global.DEBUG = false;
+global.NUM_VER = 001;
+global.TXT_VER = '0.0.1-alpha';
+global.DEBUG   = false;
 
 cli
 	.meta( 'name',      'cherry' )
@@ -51,16 +53,6 @@ cli
 	});
 
 cli
-	.command( 'config',  'manage configuration' )
-		.action(
-			function( argv ) {
-				var slave_class = require( './include/slave.js' );
-				var slave       = new slave_class( argv );
-
-				slave.find_tool();
-			}
-		)
-
 	.command( 'serve',   'run server on this machine' )
 		.option({
 			'short_name'  : 'r',
@@ -88,7 +80,7 @@ cli
 				master.bootstrap();
 			}
 		)
-	.command( 'slave', 'connect this node to the server' )
+	.command( 'connect', 'connect this node to the server' )
 		.option({
 			'short_name'  : 'i',
 			'full_name'   : 'ip',

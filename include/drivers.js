@@ -25,7 +25,6 @@ module.exports = {
 	'drivers': [
 		{
 			'name'   : 'pyrit',
-			'path'   : 'pyrit',
 			
 			'search' : function() {
 				var self = this;
@@ -33,24 +32,48 @@ module.exports = {
 				return new Promise(		
 					function( resolve, reject ) {	
 						var version_regexp = /pyrit ([0-9a-z.-]+) /i;
-						var pyrit          = child_process.exec( self.path + ' help',
-							function( error, stdout, stderr ) {
-								if ( error === null ) {
-									if ( stdout.indexOf( 'Pyrit' ) === 0 && stdout.indexOf( 'attack_passthrough' ) > 0 ) {
-										fn.printf( 'debug', '(pyrit) Tool found' );
+						var pyrit          = child_process.spawn( self.path, [ 'help' ] );
+						var found          = false;
 
-										// Определение версии //
-										self.version = version_regexp.exec( stdout )[ 1 ];
-										fn.printf( 'debug', '(pyrit) %s version detected', self.version );
+						// Обработчик поступающих данных //
+						pyrit.stdout.on( 'data',
+							function( data ) {
+								var stdout = data.toString();
 
-										resolve( true );
+								// Проверка полученных данных //
+								if ( stdout.indexOf( 'Pyrit' ) === 0 && stdout.indexOf( 'attack_passthrough' ) > 0 ) {
+									fn.printf( 'debug', '(pyrit) Tool found' );
+									found = true;
+
+									// Определение версии //
+									self.version = version_regexp.exec( stdout )[ 1 ];
+									fn.printf( 'debug', '(pyrit) %s version detected', self.version );
+								} else {
+									fn.printf( 'debug', '(pyrit) Tool found, but the driver can not manage it' );
+								}
+							}
+						);
+
+						// Обработчик ошибки запуска процесса //
+						pyrit.on( 'error',
+							function() {
+								reject( 'not_found' );
+							}
+						);
+
+						// Обработчик завершения процесса //
+						pyrit.on( 'close',
+							function( code ) {
+								// Если процесс завершился без ошибок //
+								if ( code === 0 ) {
+									// Если инструмент найден //
+									if ( found ) {
+										resolve();
 									} else {
-										fn.printf( 'debug', '(pyrit) Tool found, but the driver can not manage it' );
-										resolve( false );
+										reject( 'not_found' );
 									}
 								} else {
-									fn.printf( 'debug', '(pyrit) Tool was not found' );
-									resolve( false );
+									reject( 'die' );
 								}
 							}
 						);
@@ -63,11 +86,11 @@ module.exports = {
 
 				return new Promise(
 					function( resolve, reject ) {
-						var pyrit = child_process.spawn( self.path, [ 'benchmark' ] );
-
+						var pyrit         = child_process.spawn( self.path, [ 'benchmark' ] );
 						var speed_regexp  = /([0-9]+)/;
 						var speed;
 						
+						// Обработчик поступающих данных //
 						pyrit.stdout.on( 'data',
 							function( data ) {
 								var stdout = data.toString();
@@ -80,22 +103,29 @@ module.exports = {
 									fn.printf( 'debug', '(pyrit) Speed is %s PMKs/s', speed );
 								} else if ( stdout.indexOf( 'Computed' ) >= 0 ) {
 									// Тест скорости завершен //
-									speed = speed_regexp.exec( stdout )[ 0 ];
-									fn.printf( 'debug', '(pyrit) benchmark has been completed with %s PMKs/s', speed );
-									resolve( parseInt( speed ) );
+									speed = parseInt( speed_regexp.exec( stdout )[ 0 ] );
+									fn.printf( 'debug', '(pyrit) Benchmark has been completed with %s PMKs/s', speed );
 								}
 							}
 						);
-					}
-				);
-			},
 
-			'speed' : function() {
-				var self = this;
+						// Обработчик ошибки запуска процесса //
+						pyrit.on( 'error',
+							function( error ) {
+								reject( 'benchmark' );
+							}
+						);
 
-				return new Promise(
-					function( resolve, reject ) {
-
+						// Обработчик завершения процесса //
+						pyrit.on( 'close',
+							function( code ) {
+								if ( code === 0 ) {
+									resolve( speed );
+								} else {
+									reject( 'die' );
+								}
+							}
+						);
 					}
 				);
 			}
@@ -105,7 +135,95 @@ module.exports = {
 			'name'   : 'hashcat',
 
 			'search' : function() {
-				  
+				var self = this;
+
+				return new Promise(		
+					function( resolve, reject ) {	
+						var hashcat = child_process.spawn( self.path, [ '-V' ] );
+						var found   = false;
+
+						// Обработчик поступающих данных //
+						hashcat.stdout.on( 'data',
+							function( data ) {
+								var stdout   = data.toString();
+								self.version = stdout.substr( 0, stdout.length - 1 );
+								found        = true;
+
+								fn.printf( 'debug', '(hashcat) %s version detected', self.version );
+							}
+						);
+
+						// Обработчик ошибки запуска процесса //
+						hashcat.on( 'error',
+							function() {
+								reject( 'not_found' );
+							}
+						);
+
+						// Обработчик завершения процесса //
+						hashcat.on( 'close',
+							function() {
+								// В случае `hashcat -V` exit code = 255 //
+								if ( found ) {
+									resolve();
+								} else {
+									reject( 'not_found' );
+								}
+							}
+						);
+					}
+				);
+			},
+
+			'benchmark' : function() {
+				var self = this;
+
+				return new Promise(		
+					function( resolve, reject ) {
+						var hashcat      = child_process.spawn( self.path, [ '-m', '2500', '-b' ] );
+						var speed_regexp = /speed\/sec: ([0-9\.k]+) words/i;
+						var speed;
+
+						// Обработчик поступающих данных //
+						hashcat.stdout.on( 'data',
+							function( data ) {
+								var stdout = data.toString();
+								var result = speed_regexp.exec( stdout );
+
+								if ( result ) {
+									fn.printf( 'debug', '(hashcat) Benchmarking result: %s', result[ 1 ] );
+									speed = parseFloat( result[ 1 ] );
+
+									if ( result[ 1 ].indexOf( 'k' ) > 0 ) {
+										speed *= 1000;
+									}
+								}
+							}
+						);
+
+						// Обработчик ошибки запуска процесса //
+						hashcat.on( 'error',
+							function() {
+								reject();
+							}
+						);
+
+						// Обработчик завершения процесса //
+						hashcat.on( 'close',
+							function( code ) {
+								if ( code === 0 ) {
+									if ( speed > 0 ) {
+										resolve( speed );
+									} else {
+										reject( 'benchmark' );
+									}
+								} else {
+									reject( 'die' );
+								}
+							}
+						);
+					}
+				);
 			}
 		}
 	],

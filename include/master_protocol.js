@@ -18,7 +18,6 @@
 	along with cherry. If not, see <http://www.gnu.org/licenses/>.
 */
 
-var crypto = require( 'crypto' );
 var fn     = require( './fn.js' );
 
 // Обработчики команд, поступающих от сервера //
@@ -52,50 +51,9 @@ module.exports = {
 					return;
 				}
 
-				// Подготовка запроса //
-				var join_request = {
-					'header'      : 'join',
-					'version_num' : global.NUM_VER,
-					'version_txt' : global.TXT_VER
-				};
-
-				// Если сервер требует предоставить пароль //
-				if ( params.secure ) {
-					fn.printf( 'log', 'Master requires secure authentication' );
-
-					if ( self.config.secret !== false ) {
-						// Если пароль задан //
-						var md5sum = crypto.createHash( 'md5' );
-						md5sum.update( params.salt.toString() );
-						md5sum.update( self.config.secret );
-
-						join_request.secret = md5sum.digest( 'hex' );
-					} else {
-						fn.printf( 'error', 'You must specify secret for authentication!' );
-						connection.end();
-						return;
-					}
-				}
-
-				// Информация о словаре //
-				if ( !self.config.async ) {
-					join_request.async               = false;
-					join_request.dictionary_size     = self.dictionary.size;
-					join_request.dictionary_checksum = self.dictionary.checksum;
-				} else {
-					join_request.async               = true;
-				}
-
-				// Информация о скорости узла //
-				join_request.speed = self.speed;
-
-				// Информация об инструменте //
-				join_request.tool  = {
-					'name'    : self.tool.name,
-					'version' : self.tool.version
-				};
-
-				connection.writeJSON( join_request );
+				// Продолжаем цепочку действий узла //
+				self.chain.storage.master_params = params;
+				self.chain.next();
 			break;
 		}
 	},
@@ -104,6 +62,9 @@ module.exports = {
 		if ( params.status === 'joined' ) {
 			// Узел зарегистрирован в кластере //
 			fn.printf( 'log', 'Successfully joined the cluster' );
+
+			// Продолжаем цепочку действий узла //
+			self.chain.next();
 		} else {
 			var msg = 'Cannot join the cluster:';
 

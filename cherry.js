@@ -23,7 +23,7 @@
 var cli = require( 'cayman' );
 
 // Глобальные параметры //
-global.NUM_VER = 001;
+global.NUM_VER = 1;
 global.TXT_VER = '0.0.1-alpha';
 global.DEBUG   = false;
 

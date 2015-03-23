@@ -92,7 +92,7 @@ master.prototype.bootstrap = function() {
 		// Проверка конфигурации //
 		function( chain ) {
 			fn.printf( 'debug', 'Checking configuration...' );
-			if ( self.check_config( self.config ) ) chain.next();
+			if ( self.check_config() ) chain.next();
 		},
 
 		// Асинхронная загрузка словаря и файла handshake //
@@ -134,10 +134,23 @@ master.prototype.bootstrap = function() {
 			);
 		},
 
-		// Запуск сервера //
+		// Запуск файлового сервера //
 		function( chain ) {
-			fn.printf( 'debug', 'Bootstraping finished, starting server...' );
-			self.start_server();
+			fn.printf( 'debug', 'Starting file server...' );
+
+			self.file_server().then( chain.next );
+		},
+
+		// Запуск основного сервера //
+		function( chain ) {
+			fn.printf( 'debug', 'Bootstraping finished, starting main server...' );
+
+			self.main_server().then( chain.next );
+		},
+
+		// Запуск мониторинга скорости //
+		function( chain ) {
+			setInterval( self.performance.bind( self ), 600 );
 		}
 	]);
 
@@ -151,21 +164,39 @@ master.prototype.bootstrap = function() {
 				case 'parsing_error':
 					fn.printf( 'error', "Cannot parse configuration file '%s'. Check syntax", CONFIG );
 					break;
+
+				default:
+					throw e;
 			}
 		}
 	).run();
 };
 
-master.prototype.check_config = function( config ) {
+/**
+ * Выполняет проверку конфигурации.
+ * @return {boolean} Результат поверки
+ */
+master.prototype.check_config = function() {
+	var config = this.config;
 	var result = true;
 
-	// Проверка порта //
-	if ( config.port > 0 && config.port <= 49151 ) {
-		if ( config.port < 1024 ) {
-			fn.printf( 'warn', 'It is recommended to use port number from 1024 to 49151' );
+	// Проверка основного порта //
+	if ( config.main_port > 0 && config.main_port <= 49151 ) {
+		if ( config.main_port < 1024 ) {
+			fn.printf( 'warn', 'It is recommended to use main_port number from 1024 to 49151' );
 		}
 	} else {
-		fn.printf( 'error', "Incorrect port number '%s'", config.port );
+		fn.printf( 'error', "Incorrect main_port number '%s'", config.main_port );
+		result = false;
+	}
+
+	// Проверка порта файлового сервера //
+	if ( config.fs_port > 0 && config.fs_port <= 49151 ) {
+		if ( config.fs_port < 1024 ) {
+			fn.printf( 'warn', 'It is recommended to use fs_port number from 1024 to 49151' );
+		}
+	} else {
+		fn.printf( 'error', "Incorrect fs_port number '%s'", config.fs_port );
 		result = false;
 	}
 
@@ -266,7 +297,7 @@ master.prototype.broadcast = function( header, data, type ) {
  * Отображает карту кластера и данные о скорости узлов.
  */
 master.prototype.performance = function() {
-	process.stdout.write( "      Total speed: " + this.total_speed + " PMK/s\r" );
+	process.stdout.write( "      Total speed: " + this.total_speed + " PMKs/s\r" );
 };
 
 /**
@@ -404,7 +435,7 @@ master.prototype.connection_acceptor = function( socket ) {
 	var cluster = this;
 
 	// Обработка ограничения максимального количества узлов //
-	if ( cluster.max_clients > 0 ) {
+	if ( cluster.config.max_clients > 0 ) {
 		if ( cluster.nodes_count === cluster.config.max_clients ) {
 			// Подключено максимальное количество узлов //
 			fn.printf( 'warn', 'New connection rejected: maximum nodes count' );
@@ -452,7 +483,7 @@ master.prototype.connection_acceptor = function( socket ) {
 			response = JSON.parse( response );
 			header   = response.header;
 		} catch ( e ) {
-			fn.printf( 'debug', 'Cannot parse request from %s', socket.remoteAddress );
+			fn.printf( 'debug', 'Cannot parse message from %s', socket.remoteAddress );
 			return;
 		}
 
@@ -477,30 +508,109 @@ master.prototype.connection_acceptor = function( socket ) {
 			cluster.total_speed -= node.speed;
 		}
 
-		fn.printf( 'log', 'Client %s disconnected', node.ip );
+		fn.printf( 'log', 'Node %s disconnected', node.ip );
 	});
 };
 
-master.prototype.start_server = function() {
+master.prototype.main_server = function() {
 	var cluster = this;
-	var handler = cluster.connection_acceptor.bind( cluster );
-	var server  = net.createServer( handler );
-	var port    = cluster.config.port;
-	
-	server.once( 'error', function( err ) {
-		if ( err.code === 'EADDRINUSE' ) {
-			fn.printf( 'error', 'Cannot start server: port %s is busy', port );
-		} else {
-			fn.printf( 'error', 'Cannot start server: you have no permissions to listen port %s', port );
+
+	return new Promise(
+		function( resolve, reject ) {
+			var handler = cluster.connection_acceptor.bind( cluster );
+			var server  = net.createServer( handler );
+			var port    = cluster.config.main_port;
+			
+			server.once( 'error',
+				function( error ) {
+					if ( error.code === 'EADDRINUSE' ) {
+						fn.printf( 'error', 'Cannot start main server: port %s is busy', port );
+					} else {
+						fn.printf( 'error', 'Cannot start main server: you have no permissions to listen port %s', port );
+					}
+
+					reject();
+				}
+			).once( 'listening', function(){
+				fn.printf( 'log', 'Listening on %s port...', port );
+				resolve();
+			});
+
+			server.listen( port );
 		}
-	}).once( 'listening', function(){
-		fn.printf( 'log', 'Listening on %s port...', port );
+	);
+};
 
-		// Запуск мониторинга нагрузки //
-		setInterval( cluster.performance.bind( cluster ), 500 );
-	});
+master.prototype.file_server = function() {
+	var cluster = this;
+	var options = {
+		'flags'     : 'r',
+		'encoding'  : null,
+		'autoClose' : true
+	};
 
-	server.listen( port );
+	// Обработчик новых соединений //
+	var handler = function( socket ) {
+		// Обработчик поступающих сообщений //
+		socket.on( 'data',
+			function( data ){
+				var response = data.toString().trim();
+
+				// Обработка запроса //
+				try {
+					response = JSON.parse( response );
+				} catch ( e ) {
+					fn.printf( 'debug', 'Cannot parse request from %s', socket.remoteAddress );
+					return;
+				}
+
+				switch ( response.get ) {
+					// Запрос handshake //
+					case 'handshake':
+						options.encoding = null;
+						var stream       = fs.createReadStream( cluster.config.capturefile, options );
+
+						stream.on( 'open',
+							function() {
+								stream.pipe( socket );
+								fn.printf( 'log', 'Handshake sent to %s', socket.remoteAddress );
+							}
+						);
+
+						break;
+
+					case 'dictionary':
+						break;
+				}
+			}
+		);
+	};
+
+	return new Promise(
+		function( resolve, reject ) {
+			var server = net.createServer( handler.bind( cluster ) );
+			var port   = cluster.config.fs_port;
+
+			server.once( 'error',
+				function( error ) {
+					if ( error.code === 'EADDRINUSE' ) {
+						fn.printf( 'error', 'Cannot start file server: port %s is busy', port );
+					} else {
+						fn.printf( 'error', 'Cannot start file server: you have no permissions to listen port %s', port );
+					}
+
+					reject();
+				}
+			).once( 'listening',
+				function(){
+					fn.printf( 'debug', 'File server successfully started' );
+					resolve();
+				}
+			);
+
+			server.listen( port );
+		}
+	);
 };
 
 module.exports = master;

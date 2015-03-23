@@ -20,6 +20,7 @@
 
 var net      = require( 'net' );
 var fs       = require( 'fs' );
+var crypto   = require( 'crypto' );
 
 var fn       = require( './fn.js' );
 var chain    = require( './chains.js' );
@@ -28,7 +29,7 @@ var protocol = require( './master_protocol.js' );
 var CONFIG   = 'config/slave.conf';
 
 // Обработчик сигнала SIGINT //
-process.on('SIGINT',
+process.on( 'SIGINT',
 	function() {
 		console.log( '\n\nDO THIS!' );
 		process.exit( 0 );
@@ -51,12 +52,14 @@ net.Socket.prototype.writeJSON = function() {
  */
 function slave( argv ) {
 	this.ip         = null;  // IP-адрес master-node
+	this.connection = null;  // Ссылка на соединение
 	this.connected  = false; // Статус подключения
 	this.dictionary = null;  // Драйвер словаря
 	this.tool       = null;  // Драйвер инструмента перебора паролей
 	this.speed      = 0;     // Скорость перебора паролей
 	this.config     = {};    // Конфигурация узла
 	this.argv       = argv;  // Аргументы командной строки
+	this.chain      = null;  // Цепочка действий узла
 }
 
 /**
@@ -97,6 +100,14 @@ slave.prototype.bootstrap = function( config ) {
 			}
 		},
 
+		// Подключение к серверу //
+		function( chain ) {
+			fn.printf( 'log', 'Connecting to %s...', self.config.ip );
+
+			self.connect();
+		},
+
+		// Загрузка драйверов словаря и инструмента перебора паролей //
 		function( chain ) {
 			fn.printf( 'log', 'Loading dictionary driver...' );
 
@@ -110,8 +121,15 @@ slave.prototype.bootstrap = function( config ) {
 				// Загрузка словаря //
 				self.dictionary.info(),
 				self.dictionary.calculate_checksum()
-			]).then( chain.next ).catch(
-				function( error ) {
+			]).then(
+				function() {
+					var size = Math.floor( self.dictionary.size / 1024 );
+					fn.printf( 'log', 'Dictionary loaded. Size: %s Mb', size );
+					fn.printf( 'log', 'Benchmarking result: %s PMKs/s', self.speed );
+					chain.next();
+				},
+
+				function( e ) {
 					if ( e.error === 'NaF' ) {
 						fn.printf( 'error', "'%s' is not a file", e.path );
 					} else {
@@ -121,12 +139,15 @@ slave.prototype.bootstrap = function( config ) {
 			);
 		},
 
-		// Запуск сервера //
-		function( chain ) {
-			fn.printf( 'log', 'Cracking speed: %s PMKs/s', self.speed );
-			fn.printf( 'debug', 'Starting server...' );
+		// Запрос JOIN //
+		function( chain, storage ) {
+			fn.printf( 'log', 'Joining the cluster...' );
 
-			self.connect();
+			self.join( storage.master_params );
+		},
+
+		function( chain ) {
+			self.request_handshake().then( chain.next );
 		}
 	]);
 
@@ -140,9 +161,14 @@ slave.prototype.bootstrap = function( config ) {
 				case 'parsing_error':
 					fn.printf( 'error', "Cannot parse configuration file '%s'. Check syntax", CONFIG );
 					break;
+
+				default:
+					throw e;
 			}
 		}
 	).run();
+
+	self.chain = main;
 };
 
 /**
@@ -165,11 +191,19 @@ slave.prototype.check_config = function( config ) {
 		result = false;
 	}
 
-	// Проверка порта //
-	if ( config.port > 0 && config.port <= 49151 ) {
-		fn.printf( 'debug', 'Master\'s port set to %s', config.port );
+	// Проверка порта основного сервера //
+	if ( config.main_port > 0 && config.main_port <= 49151 ) {
+		fn.printf( 'debug', 'Master\'s main server port set to %s', config.main_port );
 	} else {
-		fn.printf( 'error', "Incorrect port number '%s'", config.port );
+		fn.printf( 'error', "Incorrect main server port number '%s'", config.main_port );
+		result = false;
+	}
+
+	// Проверка порта файлового сервера //
+	if ( config.fs_port > 0 && config.fs_port <= 49151 ) {
+		fn.printf( 'debug', 'Master\'s file server port set to %s', config.fs_port );
+	} else {
+		fn.printf( 'error', "Incorrect file server port number '%s'", config.fs_port );
 		result = false;
 	}
 
@@ -318,46 +352,179 @@ slave.prototype.load_tool_driver = function() {
 	);
 };
 
+slave.prototype.join = function( params ) {
+	var self = this;
+
+	return new Promise(
+		function( resolve, reject ) {
+			// Подготовка запроса //
+			var join_request = {
+				'header'      : 'join',
+				'version_num' : global.NUM_VER,
+				'version_txt' : global.TXT_VER
+			};
+
+			// Если сервер требует предоставить пароль //
+			if ( params.secure ) {
+				fn.printf( 'log', 'Master requires secure authentication' );
+
+				if ( self.config.secret !== false ) {
+					// Если пароль задан //
+					var md5sum = crypto.createHash( 'md5' );
+					md5sum.update( params.salt.toString() );
+					md5sum.update( self.config.secret );
+
+					join_request.secret = md5sum.digest( 'hex' );
+				} else {
+					fn.printf( 'error', 'You must specify secret for authentication!' );
+					self.connection.end();
+					return;
+				}
+			}
+
+			// Информация о словаре //
+			if ( !self.config.async ) {
+				join_request.async               = false;
+				join_request.dictionary_size     = self.dictionary.size;
+				join_request.dictionary_checksum = self.dictionary.checksum;
+			} else {
+				join_request.async               = true;
+			}
+
+			// Информация о скорости узла //
+			join_request.speed = self.speed;
+
+			// Информация об инструменте //
+			join_request.tool  = {
+				'name'    : self.tool.name,
+				'version' : self.tool.version
+			};
+
+			self.connection.writeJSON( join_request );
+		}
+	);
+};
+
+slave.prototype.request_handshake = function() {
+	var self = this;
+
+	return new Promise(
+		function( resolve, reject ) {
+			fn.printf( 'log', 'Connecting to file server...' );
+
+			// Подключение к файловому серверу //
+			var connection = net.connect(
+				{
+					'host' : self.config.ip,
+					'port' : self.config.fs_port
+				},
+
+				// Обработчик успешного подключения //
+				function() {
+					fn.printf( 'debug', 'Successfully connected to file server' );
+					fn.printf( 'debug', 'Downloading handshake...' );
+
+					// Запрос handshake //
+					connection.writeJSON({
+						'get'    : 'handshake',
+						'format' : self.tool.format
+					});
+				}
+			);
+
+			// Обработчик ошибки соединения //
+			connection.on( 'error',
+				function() {
+					fn.printf( 'error', 'Cannot connect to file server' );
+					reject();
+				}
+			);
+
+			// Обработчик поступающих данных //
+			connection.on( 'data',
+				function( data ) {
+					fs.open(
+						'tmp/handshake',
+						'w',
+
+						function( error, file ) {
+							if ( error ) {
+								fn.printf( 'error', 'Handshake downloading error: cannot write file' );
+								reject();
+								return;
+							}
+
+							// Запись буфера в файл //
+							fs.write( file,	data, 0, data.length,
+								function( error ) {
+									if ( error ) {
+										fn.printf( 'error', 'Handshake downloading error: cannot write file' );
+										reject();
+										return;			
+									} else {
+										fn.printf( 'log', 'Handshake successfully downloaded!' );
+										resolve();
+									}
+								}
+							);
+						}
+					);
+				}
+			);
+		}
+	);
+};
+
 /**
  * Подключает узел к серверу
  */
 slave.prototype.connect = function() {
-	var worker      = this;
+	var self        = this;
 	var master_ip   = this.config.ip;
-	var master_port = this.config.port;
+	var master_port = this.config.main_port;
 
-	fn.printf( 'log', 'Connecting to %s...', master_ip );
+	return new Promise(
+		function( resolve, reject ) {
+			var connection = net.connect( { 'host': master_ip, 'port': master_port }, function(){
+				resolve();
+				fn.printf( 'log', 'Successfully connected to %s!', master_ip );
+			});
 
-	var connection = net.connect( { 'host': master_ip, 'port': master_port }, function(){
-		fn.printf( 'log', 'Successfully connected to %s, now joining...', master_ip );
-	});
+			self.connection = connection;
 
-	connection.on( 'error', function(){
-		fn.printf( 'error', 'Cannot connect to %s:%s', master_ip, master_port );
-	});
+			// Обработчик ошибки подключения //
+			connection.on( 'error', function(){
+				reject();
+				fn.printf( 'error', 'Cannot connect to %s:%s', master_ip, master_port );
+			});
 
-	// Обработчик поступающих от master-node данных //
-	connection.on( 'data', function( data ){
-		var response = data.toString().trim();
-		var header   = null;
+			// Обработчик поступающих от сервера данных //
+			connection.on( 'data', function( data ){
+				var response = data.toString().trim();
+				var header   = null;
 
-		// Данные, которые не удалось распарсить, не обрабатываются //
-		try {
-			// Парсинг JSON //
-			response = JSON.parse( response );
-			header   = response.header;
-		} catch ( e ) {}
+				// Данные, которые не удалось распарсить, не обрабатываются //
+				try {
+					// Парсинг JSON //
+					response = JSON.parse( response );
+					header   = response.header;
+				} catch ( e ) {
+					fn.printf( 'warn', 'Cannot parse message from server' );
+					return;
+				}
 
-		// Вызвать обработчик соответствующей команды //
-		if ( header in protocol ) {
-			protocol[ header ]( worker, response, connection );
+				// Вызвать обработчик соответствующей команды //
+				if ( header in protocol ) {
+					protocol[ header ]( self, response, connection );
+				}
+			});
+
+			// Обработчик разрыва соединения //
+			connection.on( 'end', function(){
+				fn.printf( 'warn', 'Disconnected from server' );
+			});
 		}
-	});
-
-	// Обработчик разрыва соединения //
-	connection.on( 'end', function(){
-		fn.printf( 'warn', 'Disconnected from master-node' );
-	});
+	);
 };
 
 module.exports = slave;

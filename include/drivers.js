@@ -25,6 +25,7 @@ module.exports = {
 	'drivers': [
 		{
 			'name'   : 'pyrit',
+			'format' : 'cap',
 			
 			'search' : function() {
 				var self = this;
@@ -133,6 +134,7 @@ module.exports = {
 
 		{
 			'name'   : 'hashcat',
+			'format' : 'hccap',
 
 			'search' : function() {
 				var self = this;

@@ -20,6 +20,7 @@
 
 var crypto = require( 'crypto' );
 var fn     = require( './fn.js' );
+var fs     = require( 'fs' );
 
 var all = {
 	// Обработчик регистрации узла в кластере //
